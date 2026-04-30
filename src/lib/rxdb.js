@@ -126,27 +126,47 @@ const pushHandler = async (docs) => {
 };
 
 // ============================================
-// INICIALIZACIÓN DE BASE DE DATOS
+// INICIALIZACIÓN DE BASE DE DATOS (PATRÓN SINGLETON)
 // ============================================
 let dbInstance = null;
+let initPromise = null; // Para evitar race conditions en StrictMode
 
 export async function initRxDB() {
+  // Ya inicializada - retornar inmediatamente
   if (dbInstance) return dbInstance;
+
+  // Si hay una inicialización en curso, esperar a que termine
+  if (initPromise) return initPromise;
 
   console.log('[RxDB] Inicializando base de datos offline-first...');
 
-  // Crear base de datos con Dexie
+  // Crear base de datos con Dexie (con manejo de duplicados)
   const db = await createRxDatabase({
     name: DB_NAME,
     storage: getRxStorageDexie()
+  }).catch(err => {
+    // DB8: ignoredduplicate - la base ya existe (StrictMode)
+    if (err.code === 'DB8' || err.message?.includes('duplicate')) {
+      console.log('[RxDB] Base de datos ya existe, recuperando...');
+      return createRxDatabase({
+        name: DB_NAME,
+        storage: getRxStorageDexie(),
+        multiInstance: false // Evitar conflictos
+      });
+    }
+    throw err;
   });
 
-  // Agregar colecciones
-  await db.addCollections({
-    work_orders: { schema: workOrderSchema }
-  });
-
-  console.log('[RxDB] Colecciones creadas:', db.collections);
+  // Agregar colecciones (verificar si ya existen)
+  try {
+    await db.addCollections({
+      work_orders: { schema: workOrderSchema }
+    });
+    console.log('[RxDB] Colecciones creadas:', db.collections);
+  } catch (err) {
+    // Si las colecciones ya existen, continuar
+    console.log('[RxDB] Colecciones ya existentes, continuando...');
+  }
 
   // Iniciar replicación
   const replicationState = replicateRxCollection({
