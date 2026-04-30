@@ -34,12 +34,17 @@ export function useWorkOrders() {
         }
 
         // Iniciar replicación
-        repState = await startReplication(database);
+        const repStates = await startReplication(database);
+        repState = repStates.work_orders;
         
         // Estado de sincronización
-        repState.active$.subscribe(isActive => {
-          setSyncStatus(isActive ? 'syncing' : 'online');
-        });
+        if (repState && repState.active$) {
+          repState.active$.subscribe(isActive => {
+            setSyncStatus(isActive ? 'syncing' : 'online');
+          });
+        } else {
+          setSyncStatus('online');
+        }
 
         // Consulta inicial con manejo de errores
         const collection = database.work_orders;
