@@ -1,6 +1,7 @@
 /**
  * RxDB - Offline-First Database
  * Configuración con Dexie.js como motor de almacenamiento
+ * handlers manuales para Supabase REST API
  */
 import { createRxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
@@ -15,6 +16,7 @@ const BATCH_SIZE = 50;
 
 // ============================================
 // SCHEMA DE WORK ORDER (RxSchema)
+// Estandarizado: updated_at, deleted
 // ============================================
 const workOrderSchema = {
   version: 0,
@@ -32,45 +34,100 @@ const workOrderSchema = {
     scheduled_date: { type: 'string' },
     completed_date: { type: 'string' },
     created_at: { type: 'string' },
-    _deleted: { type: 'boolean' },
-    _last_modified: { type: 'number' }
+    updated_at: { type: 'number' },
+    deleted: { type: 'boolean' }
   },
   required: ['id', 'equipment_id', 'description', 'status']
 };
 
 // ============================================
+// SINGLETON PATTERN (Promesa Compartida)
+// Evita Error DB8 en React StrictMode
+// ============================================
+let dbInstance = null;
+let initPromise = null;
+
+async function _createDatabase() {
+  const db = await createRxDatabase({
+    name: DB_NAME,
+    storage: getRxStorageDexie(),
+    multiInstance: false
+  });
+
+  // Agregar colecciones
+  try {
+    await db.addCollections({
+      work_orders: { schema: workOrderSchema }
+    });
+  } catch (err) {
+    // Verificar si la colección ya existe o si hay un error real
+    const collections = Object.keys(db);
+    if (collections.includes('work_orders')) {
+      console.log('[RxDB] Colección work_orders ya existe');
+    } else {
+      console.error('[RxDB] Error al agregar colección:', err);
+      throw new Error(`Colección no creada: ${err.message}`);
+    }
+  }
+
+  // Verificar que la colección existe antes de retornar
+  if (!db.work_orders) {
+    throw new Error('Colección work_orders no encontrada después de inicialización');
+  }
+
+  return db;
+}
+
+export async function initRxDB() {
+  if (dbInstance) return dbInstance;
+  if (initPromise) return initPromise;
+
+  console.log('[RxDB] Inicializando base de datos...');
+
+  initPromise = _createDatabase()
+    .then(db => {
+      dbInstance = db;
+      console.log('[RxDB] Instancia creada exitosamente');
+      return db;
+    })
+    .catch(err => {
+      console.error('[RxDB] Error en inicialización:', err);
+      initPromise = null;
+      throw err;
+    });
+
+  return initPromise;
+}
+
+// ============================================
 // PULL HANDLER (Descargar del servidor)
 // ============================================
 /**
- * TODO (Arquitectura): Riesgo de pérdida de sincronización por reasignación (Query out-of-bounds).
- * Requiere rediseño de backend para eventos de cambio de scope.
+ * Riesgo: Query out-of-bounds por reasignación
  */
 const pullHandler = async (checkpoint, batchSize = BATCH_SIZE) => {
-  // Filtrar por usuario actual (escalabilidad)
   const currentUserId = 'current-user-id'; // TODO: Obtener de auth context
 
   let query = supabase
     .from('work_orders')
     .select('*')
     .eq('assigned_to', currentUserId)
-    .order('_last_modified', { ascending: true })
+    .order('updated_at', { ascending: true })
     .order('id', { ascending: true })
     .limit(batchSize);
 
-  // Paginación compuesta: timestamp mayor O (timestamp igual Y id mayor)
   if (checkpoint?.lastModified && checkpoint?.lastId) {
     query = query.or(
-      `_last_modified.gt.${checkpoint.lastModified},and(_last_modified.eq.${checkpoint.lastModified},id.gt.${checkpoint.lastId})`
+      `updated_at.gt.${checkpoint.lastModified},and(updated_at.eq.${checkpoint.lastModified},id.gt.${checkpoint.lastId})`
     );
   }
 
   const { data, error } = await query;
   if (error) throw error;
 
-  // Calcular checkpoint desde el último documento
   const lastDoc = data[data.length - 1];
   const newCheckpoint = lastDoc
-    ? { lastModified: lastDoc._last_modified, lastId: lastDoc.id }
+    ? { lastModified: lastDoc.updated_at, lastId: lastDoc.id }
     : checkpoint;
 
   return {
@@ -84,13 +141,11 @@ const pullHandler = async (checkpoint, batchSize = BATCH_SIZE) => {
 // ============================================
 /**
  * Estrategia: Sobreescritura ciega (last-write-wins)
- * NO hay validación de conflictos - PostgreSQL sobreescribe directamente
  */
 const pushHandler = async (docs) => {
-  const upserts = docs.filter(d => !d._deleted);
-  const deletes = docs.filter(d => d._deleted);
+  const upserts = docs.filter(d => !d.deleted);
+  const deletes = docs.filter(d => d.deleted);
 
-  // Upserts: enviar data sin _last_modified (trigger PostgreSQL lo maneja)
   if (upserts.length > 0) {
     const { error } = await supabase
       .from('work_orders')
@@ -106,69 +161,26 @@ const pushHandler = async (docs) => {
         scheduled_date: d.scheduled_date,
         completed_date: d.completed_date,
         created_at: d.created_at,
-        _deleted: d._deleted || false
+        deleted: d.deleted || false
       })), { onConflict: 'id' });
 
-    // Ignorar errores - la siguiente sincronización corregirá
-    if (error) console.warn('Push warning:', error);
+    if (error) console.warn('[RxDB] Push warning:', error);
   }
 
-  // Deletes: marcar como eliminados en servidor
   if (deletes.length > 0) {
     await supabase
       .from('work_orders')
-      .update({ _deleted: true })
+      .update({ deleted: true })
       .in('id', deletes.map(d => d.id));
   }
 
-  // No hay manejo de conflictos en MVP
   return [];
 };
 
 // ============================================
-// INICIALIZACIÓN DE BASE DE DATOS (PATRÓN SINGLETON)
+// INICIAR REPLICACIÓN
 // ============================================
-let dbInstance = null;
-let initPromise = null; // Para evitar race conditions en StrictMode
-
-export async function initRxDB() {
-  // Ya inicializada - retornar inmediatamente
-  if (dbInstance) return dbInstance;
-
-  // Si hay una inicialización en curso, esperar a que termine
-  if (initPromise) return initPromise;
-
-  console.log('[RxDB] Inicializando base de datos offline-first...');
-
-  // Crear base de datos con Dexie (con manejo de duplicados)
-  const db = await createRxDatabase({
-    name: DB_NAME,
-    storage: getRxStorageDexie()
-  }).catch(err => {
-    // DB8: ignoredduplicate - la base ya existe (StrictMode)
-    if (err.code === 'DB8' || err.message?.includes('duplicate')) {
-      console.log('[RxDB] Base de datos ya existe, recuperando...');
-      return createRxDatabase({
-        name: DB_NAME,
-        storage: getRxStorageDexie(),
-        multiInstance: false // Evitar conflictos
-      });
-    }
-    throw err;
-  });
-
-  // Agregar colecciones (verificar si ya existen)
-  try {
-    await db.addCollections({
-      work_orders: { schema: workOrderSchema }
-    });
-    console.log('[RxDB] Colecciones creadas:', db.collections);
-  } catch (err) {
-    // Si las colecciones ya existen, continuar
-    console.log('[RxDB] Colecciones ya existentes, continuando...');
-  }
-
-  // Iniciar replicación
+export async function startReplication(db) {
   const replicationState = replicateRxCollection({
     collection: db.work_orders,
     replicationIdentifier: 'cmms-wo-sync',
@@ -178,7 +190,6 @@ export async function initRxDB() {
     push: { handler: pushHandler }
   });
 
-  // Observar estado de replicación
   replicationState.active$.subscribe(isActive => {
     console.log('[RxDB] Replicación activa:', isActive);
   });
@@ -187,14 +198,11 @@ export async function initRxDB() {
     if (error) console.error('[RxDB] Error de replicación:', error);
   });
 
-  dbInstance = db;
-  console.log('[RxDB] Inicialización completa');
-
-  return db;
+  return replicationState;
 }
 
 // ============================================
-// HOOK DE REACT PARA USAR RxDB
+// HOOK DE REACT
 // ============================================
 import { useState, useEffect } from 'react';
 
@@ -202,20 +210,60 @@ export function useRxDB() {
   const [db, setDb] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [syncStatus, setSyncStatus] = useState('offline');
 
   useEffect(() => {
-    initRxDB()
-      .then(database => {
+    let repState = null;
+
+    async function init() {
+      try {
+        const database = await initRxDB();
         setDb(database);
+        
+        repState = await startReplication(database);
+        
+        repState.active$.subscribe(isActive => {
+          setSyncStatus(isActive ? 'syncing' : 'online');
+        });
+
         setLoading(false);
-      })
-      .catch(err => {
+      } catch (err) {
+        console.error('[useRxDB] Error:', err);
         setError(err);
         setLoading(false);
-      });
+        setSyncStatus('offline');
+      }
+    }
+
+    init();
+
+    return () => {
+      if (repState) repState.cancel();
+    };
   }, []);
 
-  return { db, loading, error };
+  return { db, loading, error, syncStatus };
+}
+
+export function useWorkOrders() {
+  const { db, loading, error, syncStatus } = useRxDB();
+  const [workOrders, setWorkOrders] = useState([]);
+
+  useEffect(() => {
+    if (!db) return;
+
+    const collection = db.work_orders;
+    const sub = collection.find().$.subscribe(docs => {
+      const activeDocs = docs
+        .map(doc => doc.toJSON())
+        .filter(doc => !doc.deleted);
+      setWorkOrders(activeDocs);
+    });
+
+    return () => sub.unsubscribe();
+  }, [db]);
+
+  return { workOrders, loading, error, syncStatus };
 }
 
 export { workOrderSchema };

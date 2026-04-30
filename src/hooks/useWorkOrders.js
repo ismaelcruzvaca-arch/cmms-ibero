@@ -3,44 +3,74 @@
  * Expone datos reactivos y estado de sincronización
  */
 import { useState, useEffect, useCallback } from 'react';
-import { initRxDB } from '../lib/rxdb';
+import { initRxDB, startReplication } from '../lib/rxdb';
 
 export function useWorkOrders() {
   const [workOrders, setWorkOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [syncStatus, setSyncStatus] = useState('offline'); // offline | syncing | online
+  const [syncStatus, setSyncStatus] = useState('offline');
   const [db, setDb] = useState(null);
 
   useEffect(() => {
     let subscription = null;
+    let repState = null;
 
     async function init() {
       try {
+        console.log('[useWorkOrders] Iniciando...');
+        
         const database = await initRxDB();
+        console.log('[useWorkOrders] DB inicializada:', !!database);
+        
         setDb(database);
 
-        // Suscribirse a cambios reactivos en la colección
-        const collection = database.work_orders;
-        
-        // Observable de replicación para estado
-        const repState = database.collections.work_orders?.__rxdb?.replicationState;
-        
-        if (repState?.active$) {
-          repState.active$.subscribe(isActive => {
-            setSyncStatus(isActive ? 'syncing' : 'online');
-          });
+        // Verificar que la colección existe
+        if (!database.work_orders) {
+          console.error('[useWorkOrders] Colección no encontrada');
+          setError(new Error('Colección work_orders no encontrada'));
+          setLoading(false);
+          return;
         }
 
-        // Consulta inicial
-        const initialDocs = await collection.find().exec();
-        setWorkOrders(initialDocs.map(doc => doc.toJSON()));
-        setLoading(false);
-
-        // Suscribir a cambios reactivos
-        subscription = collection.find().$.subscribe(docs => {
-          setWorkOrders(docs.map(doc => doc.toJSON()));
+        // Iniciar replicación
+        repState = await startReplication(database);
+        
+        // Estado de sincronización
+        repState.active$.subscribe(isActive => {
+          setSyncStatus(isActive ? 'syncing' : 'online');
         });
+
+        // Consulta inicial con manejo de errores
+        const collection = database.work_orders;
+        try {
+          const initialDocs = await collection.find().exec();
+          console.log('[useWorkOrders] Docs iniciales:', initialDocs.length);
+          
+          const activeDocs = initialDocs
+            .map(doc => doc.toJSON())
+            .filter(doc => !doc.deleted);
+            
+          setWorkOrders(activeDocs);
+        } catch (queryErr) {
+          console.warn('[useWorkOrders] Consulta inicial error:', queryErr);
+        }
+
+        // Suscribirse a cambios reactivos
+        subscription = collection.find().$.subscribe({
+          next: (docs) => {
+            const activeDocs = docs
+              .map(doc => doc.toJSON())
+              .filter(doc => !doc.deleted);
+            setWorkOrders(activeDocs);
+          },
+          error: (err) => {
+            console.error('[useWorkOrders] Suscripción error:', err);
+          }
+        });
+
+        setLoading(false);
+        console.log('[useWorkOrders] Completado');
 
       } catch (err) {
         console.error('[useWorkOrders] Error:', err);
@@ -54,10 +84,11 @@ export function useWorkOrders() {
 
     return () => {
       if (subscription) subscription.unsubscribe();
+      if (repState) repState.cancel();
     };
   }, []);
 
-  // Función para crear nuevo Work Order (escribe local, replica al servidor)
+  // Función para crear nuevo Work Order
   const createWorkOrder = useCallback(async (workOrder) => {
     if (!db) return { error: 'DB not initialized' };
     
@@ -67,7 +98,8 @@ export function useWorkOrders() {
         ...workOrder,
         id: workOrder.id || `WO-${Date.now()}`,
         created_at: new Date().toISOString(),
-        _last_modified: Date.now()
+        updated_at: Date.now(),
+        deleted: false
       });
       return { success: true };
     } catch (err) {
@@ -84,7 +116,7 @@ export function useWorkOrders() {
       const collection = db.work_orders;
       const doc = await collection.findOne(id).exec();
       if (doc) {
-        await doc.update({ $set: { ...updates, _last_modified: Date.now() } });
+        await doc.update({ $set: { ...updates, updated_at: Date.now() } });
         return { success: true };
       }
       return { error: 'Document not found' };
@@ -102,7 +134,7 @@ export function useWorkOrders() {
       const collection = db.work_orders;
       const doc = await collection.findOne(id).exec();
       if (doc) {
-        await doc.update({ $set: { _deleted: true, _last_modified: Date.now() } });
+        await doc.update({ $set: { deleted: true, updated_at: Date.now() } });
         return { success: true };
       }
       return { error: 'Document not found' };
@@ -112,12 +144,9 @@ export function useWorkOrders() {
     }
   }, [db]);
 
-  // Work Orders activas (sin soft deletes)
-  const activeWorkOrders = workOrders.filter(wo => !wo._deleted);
-
   return {
-    workOrders: activeWorkOrders,
-    allWorkOrders: workOrders, // incluye borrados lógicos
+    workOrders,
+    allWorkOrders: workOrders,
     loading,
     error,
     syncStatus,
