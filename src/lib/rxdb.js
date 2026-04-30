@@ -3,10 +3,13 @@
  * Configuración con Dexie.js como motor de almacenamiento
  * handlers manuales para Supabase REST API
  */
-import { createRxDatabase } from 'rxdb';
+import { createRxDatabase, addRxPlugin } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { replicateRxCollection } from 'rxdb/plugins/replication';
+import { RxDBMigrationSchemaPlugin } from 'rxdb/plugins/migration-schema';
 import { supabase } from './supabaseClient';
+
+addRxPlugin(RxDBMigrationSchemaPlugin);
 
 // ============================================
 // CONSTANTES DE CONFIGURACIÓN
