@@ -17,6 +17,7 @@ const BATCH_SIZE = 50;
 // ============================================
 // SCHEMA DE WORK ORDER (RxSchema)
 // Estandarizado: updated_at, deleted
+// El schema debe ser 100% serializable (JSON puro, sin funciones)
 // ============================================
 const workOrderSchema = {
   version: 1,
@@ -37,16 +38,7 @@ const workOrderSchema = {
     updated_at: { type: 'number' },
     deleted: { type: 'boolean' }
   },
-  required: ['id', 'equipment_id', 'description', 'status'],
-  migrationStrategies: {
-    1: (oldDoc) => {
-      return {
-        ...oldDoc,
-        updated_at: oldDoc._last_modified || oldDoc.updated_at || Date.now(),
-        deleted: oldDoc._deleted || false
-      };
-    }
-  }
+  required: ['id', 'equipment_id', 'description', 'status']
 };
 
 // ============================================
@@ -56,17 +48,6 @@ const workOrderSchema = {
 let dbInstance = null;
 let initPromise = null;
 
-async function _deleteDatabase() {
-  const dexie = await import('rxdb/plugins/storage-dexie');
-  const { getRxStorageDexie } = await import('rxdb/plugins/storage-dexie');
-  const db = await createRxDatabase({
-    name: DB_NAME,
-    storage: getRxStorageDexie()
-  });
-  await db.remove();
-  console.log('[RxDB] Base de datos eliminada por conflicto de schema');
-}
-
 async function _createDatabase() {
   const db = await createRxDatabase({
     name: DB_NAME,
@@ -74,15 +55,14 @@ async function _createDatabase() {
     multiInstance: false
   });
 
-  // Agregar colecciones
   try {
     await db.addCollections({
       work_orders: { schema: workOrderSchema }
     });
   } catch (err) {
-    // DB6 = conflicto de schema, intentar borrar y recrear
-    if (err.code === 'DB6' || err.message?.includes('DB6')) {
-      console.warn('[RxDB] Conflicto de schema, eliminando DB antigua...');
+    const errorStr = String(err);
+    if (errorStr.includes('DB6') || errorStr.includes('schema')) {
+      console.warn('[RxDB] Conflicto de schema, eliminando DB y recreando...');
       await db.remove();
       const newDb = await createRxDatabase({
         name: DB_NAME,
@@ -94,8 +74,7 @@ async function _createDatabase() {
       });
       return newDb;
     }
-    const collections = Object.keys(db);
-    if (collections.includes('work_orders')) {
+    if (db.work_orders) {
       console.log('[RxDB] Colección work_orders ya existe');
     } else {
       console.error('[RxDB] Error al agregar colección:', err);
