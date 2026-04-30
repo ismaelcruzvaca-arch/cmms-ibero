@@ -19,7 +19,7 @@ const BATCH_SIZE = 50;
 // Estandarizado: updated_at, deleted
 // ============================================
 const workOrderSchema = {
-  version: 0,
+  version: 1,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -37,7 +37,16 @@ const workOrderSchema = {
     updated_at: { type: 'number' },
     deleted: { type: 'boolean' }
   },
-  required: ['id', 'equipment_id', 'description', 'status']
+  required: ['id', 'equipment_id', 'description', 'status'],
+  migrationStrategies: {
+    1: (oldDoc) => {
+      return {
+        ...oldDoc,
+        updated_at: oldDoc._last_modified || oldDoc.updated_at || Date.now(),
+        deleted: oldDoc._deleted || false
+      };
+    }
+  }
 };
 
 // ============================================
@@ -46,6 +55,17 @@ const workOrderSchema = {
 // ============================================
 let dbInstance = null;
 let initPromise = null;
+
+async function _deleteDatabase() {
+  const dexie = await import('rxdb/plugins/storage-dexie');
+  const { getRxStorageDexie } = await import('rxdb/plugins/storage-dexie');
+  const db = await createRxDatabase({
+    name: DB_NAME,
+    storage: getRxStorageDexie()
+  });
+  await db.remove();
+  console.log('[RxDB] Base de datos eliminada por conflicto de schema');
+}
 
 async function _createDatabase() {
   const db = await createRxDatabase({
@@ -60,7 +80,20 @@ async function _createDatabase() {
       work_orders: { schema: workOrderSchema }
     });
   } catch (err) {
-    // Verificar si la colección ya existe o si hay un error real
+    // DB6 = conflicto de schema, intentar borrar y recrear
+    if (err.code === 'DB6' || err.message?.includes('DB6')) {
+      console.warn('[RxDB] Conflicto de schema, eliminando DB antigua...');
+      await db.remove();
+      const newDb = await createRxDatabase({
+        name: DB_NAME,
+        storage: getRxStorageDexie(),
+        multiInstance: false
+      });
+      await newDb.addCollections({
+        work_orders: { schema: workOrderSchema }
+      });
+      return newDb;
+    }
     const collections = Object.keys(db);
     if (collections.includes('work_orders')) {
       console.log('[RxDB] Colección work_orders ya existe');
@@ -70,7 +103,6 @@ async function _createDatabase() {
     }
   }
 
-  // Verificar que la colección existe antes de retornar
   if (!db.work_orders) {
     throw new Error('Colección work_orders no encontrada después de inicialización');
   }
