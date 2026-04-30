@@ -13,7 +13,6 @@ import { SimpleTreeView } from '@mui/x-tree-view/SimpleTreeView'
 import { TreeItem } from '@mui/x-tree-view/TreeItem'
 import FolderIcon from '@mui/icons-material/Folder'
 import BuildIcon from '@mui/icons-material/Build'
-import RefreshIcon from '@mui/icons-material/Refresh'
 
 // Colores para criticidad según estándar industrial
 const criticalityColors = {
@@ -155,13 +154,11 @@ export default function AssetTree() {
         <Typography variant="h5" component="h2">
           Jerarquía de Activos
         </Typography>
-        <IconButton
-          onClick={fetchData}
-          disabled={loading}
+<IconButton
           color="primary"
           aria-label="Actualizar árbol de activos"
         >
-          <RefreshIcon />
+          ↻
         </IconButton>
       </Box>
 
