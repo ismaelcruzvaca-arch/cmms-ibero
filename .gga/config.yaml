@@ -1,0 +1,10 @@
+provider: opencode
+review_extensions:
+  - js
+  - jsx
+  - ts
+  - tsx
+  - json
+  - css
+max_files: 10
+timeout: 30

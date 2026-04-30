@@ -31,8 +31,8 @@ function App() {
             <TableRow>
               <TableCell>ID</TableCell>
               <TableCell>Equipo ID</TableCell>
-              <TableCell>Descripción</TableCell>
-              <TableCell>Ubicación</TableCell>
+              <TableCell>Descripcion</TableCell>
+              <TableCell>Ubicacion</TableCell>
               <TableCell>Criticidad</TableCell>
             </TableRow>
           </TableHead>
