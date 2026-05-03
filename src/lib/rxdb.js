@@ -37,7 +37,7 @@ const workOrderSchema = {
     completed_date: { type: 'string' },
     created_at: { type: 'string' },
     updated_at: { type: 'number' },
-    deleted: { type: 'boolean' }
+    is_deleted: { type: 'boolean' }
   },
   required: ['id', 'equipment_id', 'description', 'status']
 };
@@ -64,7 +64,7 @@ const assetSchema = {
     technical_specs: { type: 'object' },
     created_at: { type: 'string' },
     updated_at: { type: 'number' },
-    deleted: { type: 'boolean' }
+    is_deleted: { type: 'boolean' }
   },
   required: ['id', 'equipment_id']
 };
@@ -80,9 +80,20 @@ const assetHierarchySchema = {
     hierarchy_level: { type: 'number' },
     created_at: { type: 'string' },
     updated_at: { type: 'number' },
-    deleted: { type: 'boolean' }
+    is_deleted: { type: 'boolean' }
   },
   required: ['id', 'parent_id', 'child_id']
+};
+
+// Schema ligero para validación offline de equipment_id (pull-only)
+const equipmentIdsSchema = {
+  version: 1,
+  primaryKey: 'equipment_id',
+  type: 'object',
+  properties: {
+    equipment_id: { type: 'string', maxLength: 50 }
+  },
+  required: ['equipment_id']
 };
 
 // ============================================
@@ -92,6 +103,8 @@ const assetHierarchySchema = {
 let dbInstance = null;
 let initPromise = null;
 let replicationStates = {};
+let replicationSubscriptions = [];
+let replicationStarted = false;
 
 async function _createDatabase() {
   const db = await createRxDatabase({
@@ -104,7 +117,8 @@ async function _createDatabase() {
     await db.addCollections({
       work_orders: { schema: workOrderSchema },
       assets: { schema: assetSchema },
-      asset_hierarchy: { schema: assetHierarchySchema }
+      asset_hierarchy: { schema: assetHierarchySchema },
+      equipment_ids: { schema: equipmentIdsSchema }
     });
   } catch (err) {
     const errorStr = String(err);
@@ -119,11 +133,12 @@ async function _createDatabase() {
       await newDb.addCollections({
         work_orders: { schema: workOrderSchema },
         assets: { schema: assetSchema },
-        asset_hierarchy: { schema: assetHierarchySchema }
+        asset_hierarchy: { schema: assetHierarchySchema },
+        equipment_ids: { schema: equipmentIdsSchema }
       });
       return newDb;
     }
-    if (db.work_orders && db.assets && db.asset_hierarchy) {
+    if (db.work_orders && db.assets && db.asset_hierarchy && db.equipment_ids) {
       console.log('[RxDB] Colecciones ya existentes');
     } else {
       console.error('[RxDB] Error al agregar colecciones:', err);
@@ -131,7 +146,7 @@ async function _createDatabase() {
     }
   }
 
-  if (!db.work_orders || !db.assets || !db.asset_hierarchy) {
+  if (!db.work_orders || !db.assets || !db.asset_hierarchy || !db.equipment_ids) {
     throw new Error('Colecciones no encontradas después de inicialización');
   }
 
@@ -180,6 +195,10 @@ function createPullHandler(tableName, orderField = 'updated_at') {
     const { data, error } = await query;
     if (error) throw error;
 
+    if (!data || !Array.isArray(data)) {
+      return { documents: [], checkpoint };
+    }
+
     const lastDoc = data[data.length - 1];
     const newCheckpoint = lastDoc
       ? { lastModified: lastDoc[orderField], lastId: lastDoc.id }
@@ -189,10 +208,39 @@ function createPullHandler(tableName, orderField = 'updated_at') {
   };
 }
 
+// Pull handler para vistas sin columna 'id' (ej. equipment_ids)
+function createPullHandlerView(tableName, orderField) {
+  return async (checkpoint, batchSize = BATCH_SIZE) => {
+    let query = supabase
+      .from(tableName)
+      .select('*')
+      .order(orderField, { ascending: true })
+      .limit(batchSize);
+
+    if (checkpoint?.lastModified) {
+      query = query.gt(orderField, checkpoint.lastModified);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    if (!data || !Array.isArray(data)) {
+      return { documents: [], checkpoint };
+    }
+
+    const lastDoc = data[data.length - 1];
+    const newCheckpoint = lastDoc
+      ? { lastModified: lastDoc[orderField], lastId: lastDoc[orderField] }
+      : checkpoint;
+
+    return { documents: data, checkpoint: newCheckpoint };
+  };
+}
+
 function createPushHandler(tableName, fields) {
   return async (docs) => {
-    const upserts = docs.filter(d => !d.deleted);
-    const deletes = docs.filter(d => d.deleted);
+    const upserts = docs.filter(d => !d.is_deleted);
+    const deletes = docs.filter(d => d.is_deleted);
 
     if (upserts.length > 0) {
       const { error } = await supabase
@@ -200,7 +248,7 @@ function createPushHandler(tableName, fields) {
         .upsert(upserts.map(d => {
           const obj = {};
           fields.forEach(f => { obj[f] = d[f]; });
-          obj.deleted = d.deleted || false;
+          obj.is_deleted = d.is_deleted || false;
           return obj;
         }), { onConflict: 'id' });
 
@@ -210,7 +258,7 @@ function createPushHandler(tableName, fields) {
     if (deletes.length > 0) {
       await supabase
         .from(tableName)
-        .update({ deleted: true })
+        .update({ is_deleted: true })
         .in('id', deletes.map(d => d.id));
     }
 
@@ -222,12 +270,28 @@ function createPushHandler(tableName, fields) {
 // REPLICACIONES
 // ============================================
 export async function startAllReplications(db) {
+  // Cancelar replicaciones anteriores si hubiera (StrictMode double-mount)
+  if (replicationStarted) {
+    replicationSubscriptions.forEach(sub => {
+      try { sub.unsubscribe(); } catch (e) { /* ignorado */ }
+    });
+    replicationSubscriptions = [];
+    await Promise.allSettled(
+      Object.values(replicationStates).map(state => {
+        try { return state.cancel(); } catch (e) { return null; }
+      })
+    );
+    replicationStates = {};
+  }
+
+  replicationStarted = true;
+
   // Work Orders
   const woPull = createPullHandler('work_orders', 'updated_at');
   const woPush = createPushHandler('work_orders', [
     'id', 'equipment_id', 'description', 'location', 'criticality',
     'status', 'priority', 'assigned_to', 'scheduled_date',
-    'completed_date', 'created_at', 'deleted'
+    'completed_date', 'created_at', 'is_deleted'
   ]);
 
   replicationStates.work_orders = replicateRxCollection({
@@ -245,7 +309,7 @@ export async function startAllReplications(db) {
     'id', 'equipment_id', 'description', 'asset_type_id', 'serial_number',
     'status', 'location', 'site', 'resource_group', 'criticality',
     'manufacturer', 'model_number', 'in_service_date', 'warranty_expiration',
-    'technical_specs', 'created_at', 'deleted'
+    'technical_specs', 'created_at', 'is_deleted'
   ]);
 
   replicationStates.assets = replicateRxCollection({
@@ -260,7 +324,7 @@ export async function startAllReplications(db) {
   // Asset Hierarchy
   const hierarchyPull = createPullHandler('asset_hierarchy', 'id');
   const hierarchyPush = createPushHandler('asset_hierarchy', [
-    'id', 'parent_id', 'child_id', 'hierarchy_level', 'created_at', 'deleted'
+    'id', 'parent_id', 'child_id', 'hierarchy_level', 'created_at', 'is_deleted'
   ]);
 
   replicationStates.asset_hierarchy = replicateRxCollection({
@@ -272,37 +336,113 @@ export async function startAllReplications(db) {
     push: { handler: hierarchyPush }
   });
 
-  // Suscripciones a estados
+  // Equipment IDs — pull-only, sin push (vista de solo lectura en Supabase)
+  const equipmentIdsPull = createPullHandlerView('equipment_ids', 'equipment_id');
+
+  replicationStates.equipment_ids = replicateRxCollection({
+    collection: db.equipment_ids,
+    replicationIdentifier: 'cmms-equipment-ids-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: equipmentIdsPull }
+  });
+
+  // Suscripciones a estados con tracked subscriptions
   Object.entries(replicationStates).forEach(([key, state]) => {
-    state.active$.subscribe(isActive => {
-      console.log(`[RxDB] ${key} activa:`, isActive);
+    const activeSub = state.active$.subscribe({
+      next: (isActive) => {
+        console.log(`[RxDB] ${key} activa:`, isActive);
+      },
+      error: (err) => {
+        console.warn(`[RxDB] ${key} active$ error:`, err);
+      }
     });
-    state.error$.subscribe(error => {
-      if (error) console.error(`[RxDB] Error ${key}:`, error);
+    const errorSub = state.error$.subscribe({
+      next: (err) => {
+        if (err) console.error(`[RxDB] Error ${key}:`, err instanceof Error ? err.message : err);
+      }
     });
+    replicationSubscriptions.push(activeSub, errorSub);
   });
 
   return replicationStates;
 }
 
+const COLLECTION_CONFIG = {
+  work_orders: {
+    tableName: 'work_orders',
+    orderField: 'updated_at',
+    fields: ['id', 'equipment_id', 'description', 'location', 'criticality',
+      'status', 'priority', 'assigned_to', 'scheduled_date',
+      'completed_date', 'created_at', 'is_deleted']
+  },
+  assets: {
+    tableName: 'assets',
+    orderField: 'updated_at_ms',
+    fields: ['id', 'equipment_id', 'description', 'asset_type_id',
+      'serial_number', 'status', 'location', 'site', 'resource_group',
+      'criticality', 'manufacturer', 'model_number', 'in_service_date',
+      'warranty_expiration', 'technical_specs', 'created_at', 'is_deleted']
+  },
+  asset_hierarchy: {
+    tableName: 'asset_hierarchy',
+    orderField: 'id',
+    fields: ['id', 'parent_id', 'child_id', 'hierarchy_level',
+      'created_at', 'is_deleted']
+  },
+  equipment_ids: {
+    tableName: 'equipment_ids',
+    orderField: 'equipment_id',
+    fields: ['equipment_id']
+  }
+};
+
 // Re-sync manual
 export async function forceResync(collectionName) {
-  const state = replicationStates[collectionName];
-  if (state) {
-    console.log(`[RxDB] Force resync: ${collectionName}`);
-    state.cancel();
-    const db = dbInstance;
-    if (db && db[collectionName]) {
-      replicationStates[collectionName] = replicateRxCollection({
-        collection: db[collectionName],
-        replicationIdentifier: `cmms-${collectionName}-resync-${Date.now()}`,
-        live: true,
-        retryTime: 5000,
-        pull: { handler: createPullHandler(collectionName) },
-        push: { handler: createPushHandler(collectionName, []) }
-      });
-    }
+  const config = COLLECTION_CONFIG[collectionName];
+  if (!config) {
+    console.warn(`[RxDB] forceResync: colección "${collectionName}" no configurada`);
+    return;
   }
+
+  const oldState = replicationStates[collectionName];
+  if (oldState) {
+    try { await oldState.cancel(); } catch (e) { /* ignorado */ }
+  }
+
+  const db = dbInstance;
+  if (!db || !db[collectionName]) {
+    console.warn(`[RxDB] forceResync: db o colección "${collectionName}" no disponible`);
+    return;
+  }
+
+  const pullHandler = createPullHandler(config.tableName, config.orderField);
+  const pushHandler = createPushHandler(config.tableName, config.fields);
+
+  const newState = replicateRxCollection({
+    collection: db[collectionName],
+    replicationIdentifier: `cmms-${collectionName}-resync-${Date.now()}`,
+    live: true,
+    retryTime: 5000,
+    pull: { handler: pullHandler },
+    push: { handler: pushHandler }
+  });
+
+  replicationStates[collectionName] = newState;
+
+  // Suscribirse al nuevo estado
+  const activeSub = newState.active$.subscribe({
+    next: (isActive) => { console.log(`[RxDB] ${collectionName} resync activa:`, isActive); },
+    error: (err) => { console.warn(`[RxDB] ${collectionName} resync active$ error:`, err); }
+  });
+  const errorSub = newState.error$.subscribe({
+    next: (err) => {
+      if (err) console.error(`[RxDB] Error resync ${collectionName}:`, err instanceof Error ? err.message : err);
+    }
+  });
+  replicationSubscriptions.push(activeSub, errorSub);
+
+  console.log(`[RxDB] Force resync completado: ${collectionName}`);
 }
 
 export async function startReplication(db) {
@@ -332,12 +472,23 @@ export function useRxDB() {
         
         // Estado combinado de todas las replicaciones
         const updateStatus = () => {
-          const anyActive = Object.values(repStates).some(s => s.active$.value);
-          setSyncStatus(anyActive ? 'syncing' : 'online');
+          try {
+            const anyActive = Object.values(repStates).some(s => {
+              try { return s.active$.value; } catch (e) { return false; }
+            });
+            setSyncStatus(anyActive ? 'syncing' : 'online');
+          } catch (e) {
+            console.warn('[useRxDB] Error updateStatus:', e);
+          }
         };
         
         Object.values(repStates).forEach(state => {
-          state.active$.subscribe(updateStatus);
+          try {
+            const sub = state.active$.subscribe(updateStatus);
+            replicationSubscriptions.push(sub);
+          } catch (e) {
+            console.warn('[useRxDB] Error suscribiendo active$:', e);
+          }
         });
 
         setLoading(false);
@@ -353,7 +504,9 @@ export function useRxDB() {
 
     return () => {
       if (repStates) {
-        Object.values(repStates).forEach(state => state.cancel());
+        Object.values(repStates).forEach(state => {
+          try { state.cancel(); } catch (e) { /* ignorado */ }
+        });
       }
     };
   }, []);
@@ -369,14 +522,25 @@ export function useWorkOrders() {
   useEffect(() => {
     if (!db) return;
 
-    const sub = db.work_orders.find().$.subscribe(docs => {
-      const activeDocs = docs
-        .map(doc => doc.toJSON())
-        .filter(doc => !doc.deleted);
-      setWorkOrders(activeDocs);
+    const sub = db.work_orders.find().$.subscribe({
+      next: (docs) => {
+        try {
+          const activeDocs = docs
+            .map(doc => doc.toJSON())
+            .filter(doc => !doc.is_deleted);
+          setWorkOrders(activeDocs);
+        } catch (e) {
+          console.error('[useWorkOrders] Error procesando docs:', e);
+        }
+      },
+      error: (err) => {
+        console.error('[useWorkOrders] Suscripción error:', err);
+      }
     });
 
-    return () => sub.unsubscribe();
+    return () => {
+      try { sub.unsubscribe(); } catch (e) { /* ignorado */ }
+    };
   }, [db]);
 
   return { workOrders, loading, error, syncStatus };
@@ -391,23 +555,41 @@ export function useAssets() {
   useEffect(() => {
     if (!db) return;
 
-    const assetsSub = db.assets.find().$.subscribe(docs => {
-      const activeDocs = docs
-        .map(doc => doc.toJSON())
-        .filter(doc => !doc.deleted);
-      setAssets(activeDocs);
+    const assetsSub = db.assets.find().$.subscribe({
+      next: (docs) => {
+        try {
+          const activeDocs = docs
+            .map(doc => doc.toJSON())
+            .filter(doc => !doc.is_deleted);
+          setAssets(activeDocs);
+        } catch (e) {
+          console.error('[useAssets] Error procesando assets:', e);
+        }
+      },
+      error: (err) => {
+        console.error('[useAssets] Suscripción assets error:', err);
+      }
     });
 
-    const hierarchySub = db.asset_hierarchy.find().$.subscribe(docs => {
-      const activeDocs = docs
-        .map(doc => doc.toJSON())
-        .filter(doc => !doc.deleted);
-      setHierarchy(activeDocs);
+    const hierarchySub = db.asset_hierarchy.find().$.subscribe({
+      next: (docs) => {
+        try {
+          const activeDocs = docs
+            .map(doc => doc.toJSON())
+            .filter(doc => !doc.is_deleted);
+          setHierarchy(activeDocs);
+        } catch (e) {
+          console.error('[useAssets] Error procesando hierarchy:', e);
+        }
+      },
+      error: (err) => {
+        console.error('[useAssets] Suscripción hierarchy error:', err);
+      }
     });
 
     return () => {
-      assetsSub.unsubscribe();
-      hierarchySub.unsubscribe();
+      try { assetsSub.unsubscribe(); } catch (e) { /* ignorado */ }
+      try { hierarchySub.unsubscribe(); } catch (e) { /* ignorado */ }
     };
   }, [db]);
 
@@ -426,7 +608,7 @@ export function useAssets() {
 
     // Construir jerarquía
     hierarchy.forEach(rel => {
-      if (!rel.deleted) {
+      if (!rel.is_deleted) {
         const parent = assetMap.get(rel.parent_id);
         const child = assetMap.get(rel.child_id);
         if (parent && child) {
@@ -460,4 +642,4 @@ export function useAssets() {
   return { assets, hierarchy, assetTree, loading, error, syncStatus, refreshAssets };
 }
 
-export { workOrderSchema, assetSchema, assetHierarchySchema };
+export { workOrderSchema, assetSchema, assetHierarchySchema, equipmentIdsSchema };

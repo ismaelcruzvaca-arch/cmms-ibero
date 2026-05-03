@@ -22,6 +22,9 @@ const criticalityColors = {
 }
 
 /**
+ * DEPRECATED — Reemplazado por src/components/AssetTree.jsx (RxDB offline-first).
+ * App unificada el 2026-05-03. Este archivo se puede eliminar si no hay referencias.
+ *
  * Componente AssetTree - Visualización jerárquica de activos
  * 
  * Construye el árbol en memoria haciendo join cliente-side entre

@@ -1,11 +1,24 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Container, Typography, Box, AppBar, Toolbar } from '@mui/material';
-import AssetTree from './AssetTree';
+import AssetTree from './components/AssetTree';
+import AddAssetForm from './components/AddAssetForm';
+import AssetDetailsPanel from './components/AssetDetailsPanel';
 import { NavSyncIndicator } from './components/SyncStatusIndicator';
 import { useWorkOrders } from './hooks/useWorkOrders';
 
 function App() {
   const { loading, syncStatus, error } = useWorkOrders();
+  const [selectedAsset, setSelectedAsset] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const handleAssetClick = (asset) => {
+    setSelectedAsset(asset);
+    setDrawerOpen(true);
+  };
+
+  const handleCloseDrawer = () => {
+    setDrawerOpen(false);
+  };
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
@@ -37,9 +50,19 @@ function App() {
           </Typography>
         </Box>
 
-        {/* Componente de árbol de activos */}
-        <AssetTree />
+        {/* Componente de árbol de activos (RxDB offline-first) */}
+        <AssetTree onAssetClick={handleAssetClick} />
+
+        {/* Formulario de creación de activos */}
+        <AddAssetForm />
       </Container>
+
+      {/* Panel lateral de detalles */}
+      <AssetDetailsPanel
+        asset={selectedAsset}
+        open={drawerOpen}
+        onClose={handleCloseDrawer}
+      />
     </Box>
   );
 }

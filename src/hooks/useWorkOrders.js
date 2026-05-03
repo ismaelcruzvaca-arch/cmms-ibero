@@ -54,7 +54,7 @@ export function useWorkOrders() {
           
           const activeDocs = initialDocs
             .map(doc => doc.toJSON())
-            .filter(doc => !doc.deleted);
+            .filter(doc => !doc.is_deleted);
             
           setWorkOrders(activeDocs);
         } catch (queryErr) {
@@ -64,10 +64,14 @@ export function useWorkOrders() {
         // Suscribirse a cambios reactivos
         subscription = collection.find().$.subscribe({
           next: (docs) => {
-            const activeDocs = docs
-              .map(doc => doc.toJSON())
-              .filter(doc => !doc.deleted);
-            setWorkOrders(activeDocs);
+            try {
+              const activeDocs = docs
+                .map(doc => doc.toJSON())
+                .filter(doc => !doc.is_deleted);
+              setWorkOrders(activeDocs);
+            } catch (e) {
+              console.error('[useWorkOrders] Error procesando docs:', e);
+            }
           },
           error: (err) => {
             console.error('[useWorkOrders] Suscripción error:', err);
@@ -88,8 +92,12 @@ export function useWorkOrders() {
     init();
 
     return () => {
-      if (subscription) subscription.unsubscribe();
-      if (repState) repState.cancel();
+      if (subscription) {
+        try { subscription.unsubscribe(); } catch (e) { /* ignorado */ }
+      }
+      if (repState) {
+        try { repState.cancel(); } catch (e) { /* ignorado */ }
+      }
     };
   }, []);
 
@@ -104,7 +112,7 @@ export function useWorkOrders() {
         id: workOrder.id || `WO-${Date.now()}`,
         created_at: new Date().toISOString(),
         updated_at: Date.now(),
-        deleted: false
+        is_deleted: false
       });
       return { success: true };
     } catch (err) {
@@ -139,7 +147,7 @@ export function useWorkOrders() {
       const collection = db.work_orders;
       const doc = await collection.findOne(id).exec();
       if (doc) {
-        await doc.update({ $set: { deleted: true, updated_at: Date.now() } });
+        await doc.update({ $set: { is_deleted: true, updated_at: Date.now() } });
         return { success: true };
       }
       return { error: 'Document not found' };

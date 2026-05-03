@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import { Box, Typography, IconButton, Chip, CircularProgress } from '@mui/material';
-import { TreeView } from '@mui/x-tree-view/TreeView';
+import { SimpleTreeView } from '@mui/x-tree-view/SimpleTreeView';
 import { TreeItem } from '@mui/x-tree-view/TreeItem';
 import FolderIcon from '@mui/icons-material/Folder';
 import BuildIcon from '@mui/icons-material/Build';
@@ -24,21 +24,29 @@ const CRITICALITY_LABELS = {
   C: 'Baja'
 };
 
-function AssetTreeNode({ node, level = 0 }) {
+function AssetTreeNode({ node, level = 0, onAssetClick }) {
   const hasChildren = node.children && node.children.length > 0;
   const criticalityStyle = CRITICALITY_COLORS[node.criticality] || CRITICALITY_COLORS.C;
 
+  const handleClick = (e) => {
+    e.stopPropagation();
+    if (onAssetClick) onAssetClick(node);
+  };
+
   return (
     <TreeItem
-      nodeId={String(node.id)}
+      itemId={String(node.id)}
       label={
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5 }}>
+        <Box
+          sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, cursor: 'pointer' }}
+          onClick={handleClick}
+        >
           {hasChildren ? (
             <FolderIcon sx={{ color: '#1976d2', fontSize: 20 }} />
           ) : (
             <BuildIcon sx={{ color: '#757575', fontSize: 20 }} />
           )}
-          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+          <Typography variant="body2" sx={{ fontWeight: 500 }} data-testid={`asset-label-${node.equipment_id}`}>
             {node.equipment_id}
           </Typography>
           {node.description && (
@@ -68,13 +76,13 @@ function AssetTreeNode({ node, level = 0 }) {
       }
     >
       {hasChildren && node.children.map(child => (
-        <AssetTreeNode key={child.id} node={child} level={level + 1} />
+        <AssetTreeNode key={child.id} node={child} level={level + 1} onAssetClick={onAssetClick} />
       ))}
     </TreeItem>
   );
 }
 
-export default function AssetTree() {
+export default function AssetTree({ onAssetClick }) {
   const { assetTree, loading, error, syncStatus, refreshAssets } = useAssets();
   const [expanded, setExpanded] = useState([]);
 
@@ -153,9 +161,9 @@ export default function AssetTree() {
             </Typography>
           </Box>
         ) : (
-          <TreeView
-            expanded={expanded}
-            onNodeToggle={handleToggle}
+          <SimpleTreeView
+            expandedItems={expanded}
+            onExpandedItemsChange={handleToggle}
             sx={{
               '& .MuiTreeItem-label': {
                 fontSize: '0.875rem'
@@ -163,9 +171,9 @@ export default function AssetTree() {
             }}
           >
             {assetTree.map(node => (
-              <AssetTreeNode key={node.id} node={node} />
+              <AssetTreeNode key={node.id} node={node} onAssetClick={onAssetClick} />
             ))}
-          </TreeView>
+          </SimpleTreeView>
         )}
       </Box>
 
