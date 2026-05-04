@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Container, Typography, Box, AppBar, Toolbar } from '@mui/material';
+import { Container, Typography, Box, AppBar, Toolbar, Button, Dialog, DialogTitle, DialogContent } from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
 import AssetTree from './components/AssetTree';
 import AddAssetForm from './components/AddAssetForm';
 import AssetDetailsPanel from './components/AssetDetailsPanel';
@@ -10,6 +11,7 @@ function App() {
   const { loading, syncStatus, error } = useWorkOrders();
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
 
   const handleAssetClick = (asset) => {
     setSelectedAsset(asset);
@@ -19,6 +21,9 @@ function App() {
   const handleCloseDrawer = () => {
     setDrawerOpen(false);
   };
+
+  const handleFormOpen = () => setFormOpen(true);
+  const handleFormClose = () => setFormOpen(false);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
@@ -50,12 +55,29 @@ function App() {
           </Typography>
         </Box>
 
+        {/* Botón de creación de activo + árbol */}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={handleFormOpen}
+            size="large"
+          >
+            + Nuevo Activo
+          </Button>
+        </Box>
+
         {/* Componente de árbol de activos (RxDB offline-first) */}
         <AssetTree onAssetClick={handleAssetClick} />
-
-        {/* Formulario de creación de activos */}
-        <AddAssetForm />
       </Container>
+
+      {/* Modal de creación de activos */}
+      <Dialog open={formOpen} onClose={handleFormClose} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 'bold' }}>Nuevo Activo</DialogTitle>
+        <DialogContent dividers>
+          <AddAssetForm onSuccess={handleFormClose} />
+        </DialogContent>
+      </Dialog>
 
       {/* Panel lateral de detalles */}
       <AssetDetailsPanel

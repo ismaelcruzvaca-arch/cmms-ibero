@@ -10,14 +10,21 @@ test('asset tree component renders', async ({ page }) => {
   await expect(page.locator('[role="tree"]')).toBeVisible();
 });
 
-test('add asset form renders correctly', async ({ page }) => {
+test('add asset form renders correctly in dialog', async ({ page }) => {
   await page.goto('/');
   await page.waitForTimeout(2000);
 
-  // El formulario debe estar visible
-  await expect(page.locator('h2:has-text("Nuevo Activo")')).toBeVisible();
+  // El botón "+ Nuevo Activo" debe estar visible
+  await expect(page.getByRole('button', { name: /Nuevo Activo/ })).toBeVisible();
 
-  // Campos requeridos deben existir
+  // Abrir el Dialog
+  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
+  await page.waitForTimeout(500);
+
+  // El diálogo debe estar visible
+  await expect(page.getByRole('dialog')).toBeVisible();
+
+  // Campos requeridos deben existir dentro del Dialog
   await expect(page.locator('input[name="equipment_id"]')).toBeVisible();
   await expect(page.locator('textarea[name="description"]')).toBeVisible();
 
@@ -30,7 +37,11 @@ test('add asset form renders correctly', async ({ page }) => {
 
 test('equipment_id validation shows error for duplicate tag', async ({ page }) => {
   await page.goto('/');
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(3000);
+
+  // Abrir el Dialog
+  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
+  await page.waitForTimeout(1000);
 
   // Llenar equipment_id con un tag que ya existe en la DB
   const equipmentInput = page.locator('input[name="equipment_id"]');
@@ -50,14 +61,16 @@ test('equipment_id validation shows error for duplicate tag', async ({ page }) =
     console.log('  [OK] Validación offline funciona - duplicado detectado');
   } else {
     console.log('  [INFO] Validación offline aún sin datos (equipment_ids no sincronizado)');
-    // No es un error: la colección equipment_ids es pull-only y puede no haber terminado
-    expect(page.locator('input[name="equipment_id"]')).toBeVisible();
   }
 });
 
 test('form enables submit when all required fields are filled', async ({ page }) => {
   await page.goto('/');
   await page.waitForTimeout(3000);
+
+  // Abrir el Dialog
+  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
+  await page.waitForTimeout(500);
 
   // Llenar equipo con tag nuevo
   await page.locator('input[name="equipment_id"]').fill('TEST-PW-002');
@@ -77,9 +90,13 @@ test('form enables submit when all required fields are filled', async ({ page })
   await expect(page.getByRole('button', { name: 'Crear Activo' })).toBeEnabled({ timeout: 5000 });
 });
 
-test('submit creates asset and shows success snackbar', async ({ page }) => {
+test('submit creates asset and auto-closes dialog', async ({ page }) => {
   await page.goto('/');
   await page.waitForTimeout(3000);
+
+  // Abrir el Dialog
+  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
+  await page.waitForTimeout(500);
 
   const tag = `TEST-PW-${Date.now()}`;
 
@@ -102,15 +119,21 @@ test('submit creates asset and shows success snackbar', async ({ page }) => {
 
   // Hacer submit
   await page.getByRole('button', { name: 'Crear Activo' }).click();
-  await page.waitForTimeout(2000);
 
-  // Verificar snackbar de éxito
-  await expect(page.locator(`text=Activo "${tag}" creado exitosamente`)).toBeVisible({ timeout: 8000 });
+  // El Dialog debe cerrarse automáticamente tras submit exitoso (onSuccess)
+  // Verificar que el Dialog ya no está visible después del auto-cierre
+  await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
+
+  console.log(`  [OK] Dialog cerrado automáticamente tras crear: ${tag}`);
 });
 
 test('dynamic spec fields appear when asset type is selected', async ({ page }) => {
   await page.goto('/');
   await page.waitForTimeout(3000);
+
+  // Abrir el Dialog
+  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
+  await page.waitForTimeout(500);
 
   // Seleccionar M-MOT
   await page.locator('.MuiSelect-select').first().click();
@@ -163,7 +186,6 @@ test('clicking tree node opens AssetDetailsPanel', async ({ page }) => {
     await page.waitForTimeout(500);
     console.log('  [OK] Panel cerrado');
   } else {
-    // Si el click en el label no abre, intentar con el content slot de MUI
     console.log('  Reintentando con .MuiTreeItem-content...');
     const content = treeItems.first().locator('.MuiTreeItem-content');
     await content.click();

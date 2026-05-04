@@ -7,7 +7,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import {
-  Box, TextField, Button, Typography, Paper, MenuItem,
+  Box, TextField, Button, Typography, MenuItem,
   Select, FormControl, InputLabel, FormHelperText,
   CircularProgress, Alert, Snackbar, Divider
 } from '@mui/material';
@@ -65,7 +65,7 @@ const INITIAL_FORM = {
 
 const INITIAL_SPECS = {};
 
-export default function AddAssetForm() {
+export default function AddAssetForm({ onSuccess }) {
   const { db, loading: dbLoading } = useRxDB();
   const [form, setForm] = useState(INITIAL_FORM);
   const [specs, setSpecs] = useState(INITIAL_SPECS);
@@ -213,6 +213,11 @@ export default function AddAssetForm() {
       setForm(INITIAL_FORM);
       setSpecs(INITIAL_SPECS);
       setTagError('');
+
+      // Cerrar el Dialog tras un breve delay para que el Snackbar sea visible
+      if (onSuccess) {
+        setTimeout(() => onSuccess(), 1200);
+      }
     } catch (err) {
       console.error('[AddAssetForm] Error insertando:', err);
       setSnackbar({ open: true, message: `Error: ${err.message || 'No se pudo crear el activo'}`, severity: 'error' });
@@ -236,12 +241,7 @@ export default function AddAssetForm() {
   }
 
   return (
-    <Paper sx={{ p: 3, mb: 3 }}>
-      <Typography variant="h5" component="h2" gutterBottom fontWeight="bold">
-        Nuevo Activo
-      </Typography>
-      <Divider sx={{ mb: 3 }} />
-
+    <>
       <Box component="form" onSubmit={handleSubmit} noValidate>
         {/* ─── equipment_id ─────────────────────────────────────────── */}
         <TextField
@@ -425,6 +425,6 @@ export default function AddAssetForm() {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Paper>
+    </>
   );
 }
