@@ -1,41 +1,63 @@
 import React, { useState } from 'react';
-import { Container, Typography, Box, AppBar, Toolbar, Button, Dialog, DialogTitle, DialogContent } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
+import {
+  Box, AppBar, Toolbar, Typography, Container, Paper, Grid
+} from '@mui/material';
 import AssetTree from './components/AssetTree';
-import AddAssetForm from './components/AddAssetForm';
-import AssetDetailsPanel from './components/AssetDetailsPanel';
 import { NavSyncIndicator } from './components/SyncStatusIndicator';
 import { useWorkOrders } from './hooks/useWorkOrders';
+import { AssetSearchBar } from './components/AssetSearchBar';
+import { AssetDetailsPanel } from './components/AssetDetailsPanel';
+import './App.css';
 
 function App() {
   const { loading, syncStatus, error } = useWorkOrders();
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
 
-  const handleAssetClick = (asset) => {
+  const handleSelectAsset = (asset) => {
     setSelectedAsset(asset);
     setDrawerOpen(true);
   };
 
-  const handleCloseDrawer = () => {
-    setDrawerOpen(false);
-  };
-
-  const handleFormOpen = () => setFormOpen(true);
-  const handleFormClose = () => setFormOpen(false);
-
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
-      {/* Barra de navegación con indicador de sincronización */}
-      <AppBar position="static" color="primary" elevation={1}>
-        <Toolbar sx={{ justifyContent: 'space-between' }}>
-          <Typography variant="h6" fontWeight="bold">
-            CMMS Ibero
-          </Typography>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f4f6f8', display: 'flex', flexDirection: 'column' }}>
+
+      {/* ── AppBar ── */}
+      <AppBar
+        position="sticky"
+        top={0}
+        elevation={0}
+        sx={{
+          background: 'linear-gradient(90deg, #1565c0 0%, #1976d2 100%)',
+          borderBottom: '1px solid rgba(255,255,255,0.12)',
+          zIndex: 1200,
+        }}
+      >
+        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 2, md: 4 } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Typography
+              variant="h6"
+              fontWeight="800"
+              sx={{ letterSpacing: 0.5, color: 'white', fontSize: { xs: '1rem', md: '1.2rem' } }}
+            >
+              CMMS Ibero
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{
+                color: 'rgba(255,255,255,0.6)',
+                display: { xs: 'none', md: 'block' },
+                borderLeft: '1px solid rgba(255,255,255,0.3)',
+                pl: 1.5,
+              }}
+            >
+              Módulo de Jerarquía de Activos
+            </Typography>
+          </Box>
+
           {loading ? (
-            <Typography variant="body2" sx={{ opacity: 0.8 }}>
-              Cargando...
+            <Typography variant="body2" sx={{ opacity: 0.7, color: 'white' }}>
+              Cargando…
             </Typography>
           ) : error ? (
             <NavSyncIndicator status="offline" />
@@ -45,45 +67,78 @@ function App() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="md" sx={{ py: 4 }}>
-        <Box sx={{ mb: 4, textAlign: 'center' }}>
-          <Typography variant="h3" component="h1" gutterBottom color="primary.main" fontWeight="bold">
-            Módulo de Jerarquía de Activos
-          </Typography>
-          <Typography variant="subtitle1" color="text.secondary">
-            Sistema de Gestión de Mantenimiento
-          </Typography>
+      {/* ── Contenido principal ── */}
+      <Box sx={{ flex: 1, px: { xs: 2, sm: 3, md: 4, lg: 6 }, py: { xs: 2, md: 3 } }}>
+
+        {/* Barra de búsqueda — ancho completo */}
+        <Box sx={{ mb: 3 }}>
+          <AssetSearchBar onSelectAsset={handleSelectAsset} />
         </Box>
 
-        {/* Botón de creación de activo + árbol */}
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleFormOpen}
-            size="large"
-          >
-            + Nuevo Activo
-          </Button>
-        </Box>
+        {/* Layout de dos columnas en desktop */}
+        <Grid container spacing={3} alignItems="flex-start">
 
-        {/* Componente de árbol de activos (RxDB offline-first) */}
-        <AssetTree onAssetClick={handleAssetClick} />
-      </Container>
+          {/* Columna principal: Árbol de activos */}
+          <Grid size={{ xs: 12, md: 8, lg: 9 }}>
+            <Paper
+              elevation={0}
+              sx={{
+                borderRadius: 3,
+                border: '1px solid #e0e0e0',
+                bgcolor: 'white',
+                overflow: 'hidden',
+              }}
+            >
+              <AssetTree onSelectAsset={handleSelectAsset} />
+            </Paper>
+          </Grid>
 
-      {/* Modal de creación de activos */}
-      <Dialog open={formOpen} onClose={handleFormClose} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 'bold' }}>Nuevo Activo</DialogTitle>
-        <DialogContent dividers>
-          <AddAssetForm onSuccess={handleFormClose} />
-        </DialogContent>
-      </Dialog>
+          {/* Columna lateral: Estadísticas / ayuda rápida en desktop */}
+          <Grid size={{ xs: 12, md: 4, lg: 3 }}>
+            <Paper
+              elevation={0}
+              sx={{
+                borderRadius: 3,
+                border: '1px solid #e0e0e0',
+                bgcolor: 'white',
+                p: 3,
+              }}
+            >
+              <Typography variant="subtitle2" fontWeight="700" color="primary.main" gutterBottom>
+                💡 Cómo navegar
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
+                Usá el <strong>buscador</strong> para localizar un equipo por su ID (ej. <code>TOS-MOT</code>) o por descripción.
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
+                Hacé clic en cualquier nodo del árbol para expandir su jerarquía de equipos.
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
+                Al seleccionar un equipo, se abre el <strong>panel de detalles</strong> con sus especificaciones técnicas.
+              </Typography>
+
+              <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid #f0f0f0' }}>
+                <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 0.5 }}>
+                  Base de datos
+                </Typography>
+                <Typography variant="body2" fontWeight="600" color="text.primary">
+                  535 equipos indexados
+                </Typography>
+                <Typography variant="caption" color="text.disabled">
+                  Sincronizado desde Epicor vía Supabase
+                </Typography>
+              </Box>
+            </Paper>
+          </Grid>
+
+        </Grid>
+      </Box>
 
       {/* Panel lateral de detalles */}
       <AssetDetailsPanel
         asset={selectedAsset}
         open={drawerOpen}
-        onClose={handleCloseDrawer}
+        onClose={() => setDrawerOpen(false)}
       />
     </Box>
   );

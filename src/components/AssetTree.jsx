@@ -3,13 +3,34 @@
  * Usa MUI Tree View con construcción memoizada del árbol
  */
 import React, { useState } from 'react';
-import { Box, Typography, IconButton, Chip, CircularProgress } from '@mui/material';
 import { SimpleTreeView } from '@mui/x-tree-view/SimpleTreeView';
 import { TreeItem } from '@mui/x-tree-view/TreeItem';
-import FolderIcon from '@mui/icons-material/Folder';
-import BuildIcon from '@mui/icons-material/Build';
-import RefreshIcon from '@mui/icons-material/Refresh';
+import { Box, Typography, IconButton, Chip, CircularProgress, SvgIcon } from '@mui/material';
 import { useAssets } from '../lib/rxdb';
+
+function FolderIcon(props) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8z" />
+    </SvgIcon>
+  );
+}
+
+function BuildIcon(props) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z" />
+    </SvgIcon>
+  );
+}
+
+function RefreshIcon(props) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" />
+    </SvgIcon>
+  );
+}
 
 // Colores para criticidad
 const CRITICALITY_COLORS = {
@@ -24,29 +45,29 @@ const CRITICALITY_LABELS = {
   C: 'Baja'
 };
 
-function AssetTreeNode({ node, level = 0, onAssetClick }) {
+function AssetTreeNode({ node, level = 0, onSelectAsset }) {
   const hasChildren = node.children && node.children.length > 0;
   const criticalityStyle = CRITICALITY_COLORS[node.criticality] || CRITICALITY_COLORS.C;
-
-  const handleClick = (e) => {
-    e.stopPropagation();
-    if (onAssetClick) onAssetClick(node);
-  };
 
   return (
     <TreeItem
       itemId={String(node.id)}
       label={
         <Box
-          sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, cursor: 'pointer' }}
-          onClick={handleClick}
+          sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5 }}
+          onClick={(e) => {
+            if (!hasChildren) {
+              e.stopPropagation();
+              onSelectAsset && onSelectAsset(node);
+            }
+          }}
         >
           {hasChildren ? (
             <FolderIcon sx={{ color: '#1976d2', fontSize: 20 }} />
           ) : (
             <BuildIcon sx={{ color: '#757575', fontSize: 20 }} />
           )}
-          <Typography variant="body2" sx={{ fontWeight: 500 }} data-testid={`asset-label-${node.equipment_id}`}>
+          <Typography variant="body2" sx={{ fontWeight: 500 }}>
             {node.equipment_id}
           </Typography>
           {node.description && (
@@ -76,13 +97,13 @@ function AssetTreeNode({ node, level = 0, onAssetClick }) {
       }
     >
       {hasChildren && node.children.map(child => (
-        <AssetTreeNode key={child.id} node={child} level={level + 1} onAssetClick={onAssetClick} />
+        <AssetTreeNode key={child.id} node={child} level={level + 1} onSelectAsset={onSelectAsset} />
       ))}
     </TreeItem>
   );
 }
 
-export default function AssetTree({ onAssetClick }) {
+export default function AssetTree({ onSelectAsset }) {
   const { assetTree, loading, error, syncStatus, refreshAssets } = useAssets();
   const [expanded, setExpanded] = useState([]);
 
@@ -171,7 +192,7 @@ export default function AssetTree({ onAssetClick }) {
             }}
           >
             {assetTree.map(node => (
-              <AssetTreeNode key={node.id} node={node} onAssetClick={onAssetClick} />
+              <AssetTreeNode key={node.id} node={node} onSelectAsset={onSelectAsset} />
             ))}
           </SimpleTreeView>
         )}

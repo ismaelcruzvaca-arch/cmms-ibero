@@ -1,220 +1,196 @@
-/**
- * AssetDetailsPanel — Panel lateral de detalles de activo
- * 
- * Drawer anclado a la derecha. Renderiza campos base + technical_specs (JSONB)
- * con formato legible. Solo lectura.
- */
 import React from 'react';
 import {
-  Drawer, Box, Typography, Chip, IconButton, Divider,
-  Table, TableBody, TableCell, TableRow
+  Drawer,
+  Box,
+  Typography,
+  IconButton,
+  Divider,
+  Chip,
+  Paper,
+  Stack,
+  SvgIcon
 } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
-import BuildIcon from '@mui/icons-material/Build';
-import LocationOnIcon from '@mui/icons-material/LocationOn';
-import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 
-const DRAWER_WIDTH = 420;
-
-// ─── Colores según criticidad y status ────────────────────────────────
-const CRIT_COLORS = {
-  A: { bg: '#ff1744', color: '#fff' },
-  B: { bg: '#ff9100', color: '#fff' },
-  C: { bg: '#00e676', color: '#000' }
-};
-
-const STATUS_COLORS = {
-  Active: { bg: '#e8f5e9', color: '#2e7d32' },
-  Inactive: { bg: '#fce4ec', color: '#c62828' }
-};
-
-// ─── Humanizar llaves JSONB ───────────────────────────────────────────
-function humanizeKey(key) {
-  return key
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase())
-    .replace(/\bHp\b/g, 'HP')
-    .replace(/\bRpm\b/g, 'RPM')
-    .replace(/\bPsi\b/g, 'PSI')
-    .replace(/\bBtu\b/g, 'BTU')
-    .replace(/\bId\b/g, 'ID');
+function CloseIcon(props) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+    </SvgIcon>
+  );
 }
 
-// ─── Formatear valores ────────────────────────────────────────────────
-function formatValue(value) {
-  if (value === null || value === undefined) return '—';
-  if (typeof value === 'boolean') return value ? 'Sí' : 'No';
-  return String(value);
-}
+const CRITICALITY_COLORS = {
+  A: { bg: '#ff1744', color: 'white', label: 'Alta' },
+  B: { bg: '#ff9100', color: 'white', label: 'Media' },
+  C: { bg: '#00e676', color: 'black', label: 'Baja' }
+};
 
-export default function AssetDetailsPanel({ asset, open, onClose }) {
+export function AssetDetailsPanel({ asset, open, onClose }) {
   if (!asset) return null;
 
-  const critStyle = CRIT_COLORS[asset.criticality] || CRIT_COLORS.C;
-  const statusStyle = STATUS_COLORS[asset.status] || STATUS_COLORS.Active;
-  const hasSpecs = asset.technical_specs && typeof asset.technical_specs === 'object'
-    && Object.keys(asset.technical_specs).length > 0;
+  const criticality = CRITICALITY_COLORS[asset.criticality] || CRITICALITY_COLORS.C;
 
   return (
     <Drawer
       anchor="right"
       open={open}
       onClose={onClose}
-      sx={{
-        '& .MuiDrawer-paper': {
-          width: DRAWER_WIDTH,
-          p: 0
+      slotProps={{
+        paper: {
+          sx: { width: { xs: '100%', sm: 420 }, p: 3, borderTopLeftRadius: 16, borderBottomLeftRadius: 16 }
         }
       }}
     >
-      {/* ─── Header ──────────────────────────────────────────────── */}
-      <Box sx={{ p: 3, pb: 2 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h6" fontWeight="bold" color="primary.main">
+          Detalle del Activo
+        </Typography>
+        <IconButton onClick={onClose} edge="end" aria-label="Cerrar detalles">
+          <CloseIcon />
+        </IconButton>
+      </Box>
+
+      <Divider sx={{ mb: 3 }} />
+
+      <Stack spacing={3}>
+        {/* Identificación Principal */}
+        <Box>
+          <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 1, fontWeight: 'bold' }}>
+            ID del Equipo
+          </Typography>
+          <Typography variant="h4" fontWeight="800" color="primary.dark">
+            {asset.equipment_id}
+          </Typography>
+        </Box>
+
+        <Box>
+          <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 1, fontWeight: 'bold' }}>
+            Descripción
+          </Typography>
+          <Typography variant="body1" sx={{ color: 'text.primary', fontSize: '1.05rem', lineHeight: 1.5 }}>
+            {asset.description || 'Sin descripción'}
+          </Typography>
+        </Box>
+
+        {/* Metadatos Rápidos */}
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Chip
+            label={`Criticidad: ${criticality.label}`}
+            sx={{ backgroundColor: criticality.bg, color: criticality.color, fontWeight: 'bold', px: 1 }}
+          />
+          {asset.location && (
+            <Chip label={`📍 ${asset.location}`} variant="outlined" sx={{ fontWeight: 500 }} />
+          )}
+          {asset.site && (
+            <Chip label={`🏢 ${asset.site}`} variant="outlined" sx={{ fontWeight: 500 }} />
+          )}
+        </Box>
+
+        <Divider />
+
+        {/* Ficha Técnica / Propiedades */}
+        <Box>
+          <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1.5, color: 'text.secondary' }}>
+            Información del Activo
+          </Typography>
+
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafafa' }}>
+            <Stack spacing={2}>
+              {asset.serial_number && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    Número de Serie
+                  </Typography>
+                  <Typography variant="body2" fontWeight="600" color="text.primary">
+                    {asset.serial_number}
+                  </Typography>
+                </Box>
+              )}
+
+              {asset.manufacturer && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    Fabricante
+                  </Typography>
+                  <Typography variant="body2" fontWeight="600" color="text.primary">
+                    {asset.manufacturer}
+                  </Typography>
+                </Box>
+              )}
+
+              {asset.model_number && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    Modelo
+                  </Typography>
+                  <Typography variant="body2" fontWeight="600" color="text.primary">
+                    {asset.model_number}
+                  </Typography>
+                </Box>
+              )}
+
+              {asset.resource_group && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    Grupo de Recursos
+                  </Typography>
+                  <Typography variant="body2" fontWeight="600" color="text.primary">
+                    {asset.resource_group}
+                  </Typography>
+                </Box>
+              )}
+
+              {asset.in_service_date && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    Fecha de Puesta en Servicio
+                  </Typography>
+                  <Typography variant="body2" fontWeight="600" color="text.primary">
+                    {new Date(asset.in_service_date).toLocaleDateString()}
+                  </Typography>
+                </Box>
+              )}
+
+              {asset.asset_type_id && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    Tipo de Activo ID
+                  </Typography>
+                  <Typography variant="body2" fontWeight="600" color="text.primary">
+                    {asset.asset_type_id}
+                  </Typography>
+                </Box>
+              )}
+            </Stack>
+          </Paper>
+        </Box>
+
+        {/* Specs JSON de Epicor (technical_specs) */}
+        {asset.technical_specs && Object.keys(asset.technical_specs).length > 0 && (
           <Box>
-            <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 1 }}>
-              Expediente Técnico
+            <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1.5, color: 'text.secondary' }}>
+              Especificaciones Técnicas (Epicor)
             </Typography>
-            <Typography variant="h4" fontWeight="bold" sx={{ mt: 0.5 }}>
-              {asset.equipment_id}
-            </Typography>
-            <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>
-              {asset.description || 'Sin descripción'}
-            </Typography>
-          </Box>
-          <IconButton onClick={onClose} size="small" sx={{ mt: 0.5 }}>
-            <CloseIcon />
-          </IconButton>
-        </Box>
-
-        {/* Chips de estado */}
-        <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-          {asset.criticality && (
-            <Chip
-              label={`Criticidad: ${asset.criticality}`}
-              size="small"
-              sx={{ backgroundColor: critStyle.bg, color: critStyle.color, fontWeight: 'bold' }}
-            />
-          )}
-          {asset.status && (
-            <Chip
-              label={asset.status === 'Active' ? 'Activo' : 'Inactivo'}
-              size="small"
-              sx={{ backgroundColor: statusStyle.bg, color: statusStyle.color, fontWeight: 'bold' }}
-            />
-          )}
-        </Box>
-      </Box>
-
-      <Divider />
-
-      {/* ─── Cuerpo: Datos base ──────────────────────────────────── */}
-      <Box sx={{ p: 3, pt: 2 }}>
-        <Typography variant="subtitle2" color="primary" gutterBottom sx={{ mb: 2 }}>
-          Información General
-        </Typography>
-
-        <Table size="small" sx={{ '& td': { border: 'none', py: 1 } }}>
-          <TableBody>
-            {asset.location && (
-              <TableRow>
-                <TableCell sx={{ color: 'text.secondary', width: 100, pl: 0 }}>
-                  <LocationOnIcon fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
-                  Ubicación
-                </TableCell>
-                <TableCell sx={{ fontWeight: 500 }}>{asset.location}</TableCell>
-              </TableRow>
-            )}
-            {asset.asset_type_id && (
-              <TableRow>
-                <TableCell sx={{ color: 'text.secondary', width: 100, pl: 0 }}>
-                  <BuildIcon fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
-                  Tipo
-                </TableCell>
-                <TableCell sx={{ fontWeight: 500 }}>{asset.asset_type_id}</TableCell>
-              </TableRow>
-            )}
-            {asset.manufacturer && (
-              <TableRow>
-                <TableCell sx={{ color: 'text.secondary', pl: 0 }}>Fabricante</TableCell>
-                <TableCell sx={{ fontWeight: 500 }}>{asset.manufacturer}</TableCell>
-              </TableRow>
-            )}
-            {asset.model_number && (
-              <TableRow>
-                <TableCell sx={{ color: 'text.secondary', pl: 0 }}>Modelo</TableCell>
-                <TableCell sx={{ fontWeight: 500 }}>{asset.model_number}</TableCell>
-              </TableRow>
-            )}
-            {asset.serial_number && (
-              <TableRow>
-                <TableCell sx={{ color: 'text.secondary', pl: 0 }}>N° Serie</TableCell>
-                <TableCell sx={{ fontWeight: 500 }}>{asset.serial_number}</TableCell>
-              </TableRow>
-            )}
-            {asset.site && (
-              <TableRow>
-                <TableCell sx={{ color: 'text.secondary', pl: 0 }}>Planta</TableCell>
-                <TableCell sx={{ fontWeight: 500 }}>{asset.site}</TableCell>
-              </TableRow>
-            )}
-            {asset.resource_group && (
-              <TableRow>
-                <TableCell sx={{ color: 'text.secondary', pl: 0 }}>Grupo</TableCell>
-                <TableCell sx={{ fontWeight: 500 }}>{asset.resource_group}</TableCell>
-              </TableRow>
-            )}
-            {asset.in_service_date && (
-              <TableRow>
-                <TableCell sx={{ color: 'text.secondary', pl: 0 }}>
-                  <CalendarTodayIcon fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
-                  En servicio
-                </TableCell>
-                <TableCell sx={{ fontWeight: 500 }}>{asset.in_service_date}</TableCell>
-              </TableRow>
-            )}
-            {asset.warranty_expiration && (
-              <TableRow>
-                <TableCell sx={{ color: 'text.secondary', pl: 0 }}>Garantía</TableCell>
-                <TableCell sx={{ fontWeight: 500 }}>{asset.warranty_expiration}</TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Box>
-
-      {/* ─── Sección Dinámica: technical_specs (JSONB) ──────────── */}
-      {hasSpecs && (
-        <>
-          <Divider />
-          <Box sx={{ p: 3, pt: 2 }}>
-            <Typography variant="subtitle2" color="primary" gutterBottom sx={{ mb: 2 }}>
-              Especificaciones Técnicas
-            </Typography>
-
-            <Table size="small" sx={{ '& td': { border: 'none', py: 1 } }}>
-              <TableBody>
-                {Object.entries(asset.technical_specs).map(([key, value]) => (
-                  <TableRow key={key}>
-                    <TableCell sx={{ color: 'text.secondary', width: 155, pl: 0, fontWeight: 500 }}>
-                      {humanizeKey(key)}
-                    </TableCell>
-                    <TableCell>{formatValue(value)}</TableCell>
-                  </TableRow>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#f4f6f8' }}>
+              <Stack spacing={1}>
+                {Object.entries(asset.technical_specs).map(([key, val]) => (
+                  <Box key={key} sx={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #e0e0e0', pb: 0.5 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 550, textTransform: 'capitalize' }}>
+                      {key.replace(/_/g, ' ')}
+                    </Typography>
+                    <Typography variant="body2" color="text.primary" sx={{ fontWeight: 600 }}>
+                      {String(val)}
+                    </Typography>
+                  </Box>
                 ))}
-              </TableBody>
-            </Table>
+              </Stack>
+            </Paper>
           </Box>
-        </>
-      )}
-
-      {/* ─── Footer: metadata ───────────────────────────────────── */}
-      <Box sx={{ flexGrow: 1 }} />
-      <Divider />
-      <Box sx={{ p: 2 }}>
-        <Typography variant="caption" color="text.disabled">
-          ID: {asset.id} &nbsp;|&nbsp; Creado: {asset.created_at ? new Date(asset.created_at).toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
-        </Typography>
-      </Box>
+        )}
+      </Stack>
     </Drawer>
   );
 }
+
+export default AssetDetailsPanel;

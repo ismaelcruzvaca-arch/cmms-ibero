@@ -36,8 +36,7 @@ const workOrderSchema = {
     scheduled_date: { type: 'string' },
     completed_date: { type: 'string' },
     created_at: { type: 'string' },
-    updated_at: { type: 'number' },
-    deleted: { type: 'boolean' }
+    updated_at: { type: 'number' }
   },
   required: ['id', 'equipment_id', 'description', 'status']
 };
@@ -63,8 +62,7 @@ const assetSchema = {
     warranty_expiration: { type: 'string' },
     technical_specs: { type: 'object' },
     created_at: { type: 'string' },
-    updated_at: { type: 'number' },
-    deleted: { type: 'boolean' }
+    updated_at: { type: 'number' }
   },
   required: ['id', 'equipment_id']
 };
@@ -79,8 +77,7 @@ const assetHierarchySchema = {
     child_id: { type: 'string', maxLength: 100 },
     hierarchy_level: { type: 'number' },
     created_at: { type: 'string' },
-    updated_at: { type: 'number' },
-    deleted: { type: 'boolean' }
+    updated_at: { type: 'number' }
   },
   required: ['id', 'parent_id', 'child_id']
 };
@@ -164,6 +161,7 @@ export async function initRxDB() {
 // ============================================
 function createPullHandler(tableName, orderField = 'updated_at') {
   return async (checkpoint, batchSize = BATCH_SIZE) => {
+    console.log(`[RxDB Sync] Iniciando pull de ${tableName}. Checkpoint actual:`, checkpoint);
     let query = supabase
       .from(tableName)
       .select('*')
@@ -177,44 +175,104 @@ function createPullHandler(tableName, orderField = 'updated_at') {
       );
     }
 
-    const { data, error } = await query;
-    if (error) throw error;
+    try {
+      const { data, error } = await query;
+      if (error) {
+        console.error(`[RxDB Sync] Error en consulta pull de ${tableName}:`, error);
+        throw error;
+      }
 
-    const lastDoc = data[data.length - 1];
-    const newCheckpoint = lastDoc
-      ? { lastModified: lastDoc[orderField], lastId: lastDoc.id }
-      : checkpoint;
+      console.log(`[RxDB Sync] Consulta pull de ${tableName} exitosa. Registros devueltos: ${data ? data.length : 0}`);
 
-    return { documents: data, checkpoint: newCheckpoint };
+      // Mapear campos de Supabase a los nombres y tipos esperados por RxDB
+      const mappedDocs = data.map(doc => {
+        const mapped = { ...doc };
+
+        // 1. Mapeo de is_deleted -> _deleted (RxDB v15 soft-delete nativo)
+        if ('is_deleted' in doc) {
+          mapped._deleted = !!doc.is_deleted;
+          delete mapped.is_deleted;
+        } else if ('deleted' in doc) {
+          mapped._deleted = !!doc.deleted;
+          delete mapped.deleted;
+        } else {
+          mapped._deleted = false;
+        }
+
+        // 2. Mapeo de updated_at (debe ser number para cumplir con el esquema RxDB)
+        if (typeof doc.updated_at === 'string') {
+          // Si es assets o asset_hierarchy usamos el campo updated_at_ms (si existe) o convertimos la fecha string a timestamp
+          mapped.updated_at = doc.updated_at_ms || new Date(doc.updated_at).getTime() || Date.now();
+        } else if (!doc.updated_at) {
+          mapped.updated_at = Date.now();
+        }
+
+        return mapped;
+      });
+
+      const lastDoc = data[data.length - 1];
+      const newCheckpoint = lastDoc
+        ? { lastModified: lastDoc[orderField], lastId: lastDoc.id }
+        : checkpoint;
+
+      console.log(`[RxDB Sync] Pull de ${tableName} completado. Checkpoint nuevo:`, newCheckpoint);
+      return { documents: mappedDocs, checkpoint: newCheckpoint };
+    } catch (err) {
+      console.error(`[RxDB Sync] Excepción en pull de ${tableName}:`, err);
+      throw err;
+    }
   };
 }
 
 function createPushHandler(tableName, fields) {
   return async (docs) => {
-    const upserts = docs.filter(d => !d.deleted);
-    const deletes = docs.filter(d => d.deleted);
+    console.log(`[RxDB Sync] Iniciando push de ${tableName}. Documentos:`, docs);
+    const upserts = docs.filter(d => !d._deleted);
+    const deletes = docs.filter(d => d._deleted);
 
-    if (upserts.length > 0) {
-      const { error } = await supabase
-        .from(tableName)
-        .upsert(upserts.map(d => {
-          const obj = {};
-          fields.forEach(f => { obj[f] = d[f]; });
-          obj.deleted = d.deleted || false;
+    try {
+      if (upserts.length > 0) {
+        const mappedUpserts = upserts.map(d => {
+          const obj = { is_deleted: false };
+          fields.forEach(f => {
+            if (f === 'updated_at') {
+              obj.updated_at = new Date(d.updated_at).toISOString();
+              obj.updated_at_ms = d.updated_at;
+            } else {
+              obj[f] = d[f];
+            }
+          });
           return obj;
-        }), { onConflict: 'id' });
+        });
 
-      if (error) console.warn(`[RxDB] Push ${tableName} warning:`, error);
+        const { error } = await supabase
+          .from(tableName)
+          .upsert(mappedUpserts, { onConflict: 'id' });
+
+        if (error) {
+          console.error(`[RxDB Sync] Error en push upsert de ${tableName}:`, error);
+          throw error;
+        }
+      }
+
+      if (deletes.length > 0) {
+        const { error } = await supabase
+          .from(tableName)
+          .update({ is_deleted: true })
+          .in('id', deletes.map(d => d.id));
+
+        if (error) {
+          console.error(`[RxDB Sync] Error en push delete de ${tableName}:`, error);
+          throw error;
+        }
+      }
+
+      console.log(`[RxDB Sync] Push de ${tableName} completado exitosamente`);
+      return [];
+    } catch (err) {
+      console.error(`[RxDB Sync] Excepción en push de ${tableName}:`, err);
+      throw err;
     }
-
-    if (deletes.length > 0) {
-      await supabase
-        .from(tableName)
-        .update({ deleted: true })
-        .in('id', deletes.map(d => d.id));
-    }
-
-    return [];
   };
 }
 
@@ -227,7 +285,7 @@ export async function startAllReplications(db) {
   const woPush = createPushHandler('work_orders', [
     'id', 'equipment_id', 'description', 'location', 'criticality',
     'status', 'priority', 'assigned_to', 'scheduled_date',
-    'completed_date', 'created_at', 'deleted'
+    'completed_date', 'created_at'
   ]);
 
   replicationStates.work_orders = replicateRxCollection({
@@ -245,7 +303,7 @@ export async function startAllReplications(db) {
     'id', 'equipment_id', 'description', 'asset_type_id', 'serial_number',
     'status', 'location', 'site', 'resource_group', 'criticality',
     'manufacturer', 'model_number', 'in_service_date', 'warranty_expiration',
-    'technical_specs', 'created_at', 'deleted'
+    'technical_specs', 'created_at'
   ]);
 
   replicationStates.assets = replicateRxCollection({
@@ -260,7 +318,7 @@ export async function startAllReplications(db) {
   // Asset Hierarchy
   const hierarchyPull = createPullHandler('asset_hierarchy', 'id');
   const hierarchyPush = createPushHandler('asset_hierarchy', [
-    'id', 'parent_id', 'child_id', 'hierarchy_level', 'created_at', 'deleted'
+    'id', 'parent_id', 'child_id', 'hierarchy_level', 'created_at'
   ]);
 
   replicationStates.asset_hierarchy = replicateRxCollection({
@@ -383,7 +441,7 @@ export function useWorkOrders() {
     const sub = db.work_orders.find().$.subscribe(docs => {
       const activeDocs = docs
         .map(doc => doc.toJSON())
-        .filter(doc => !doc.deleted);
+        .filter(doc => !doc._deleted);
       setWorkOrders(activeDocs);
     });
 
@@ -405,14 +463,14 @@ export function useAssets() {
     const assetsSub = db.assets.find().$.subscribe(docs => {
       const activeDocs = docs
         .map(doc => doc.toJSON())
-        .filter(doc => !doc.deleted);
+        .filter(doc => !doc._deleted);
       setAssets(activeDocs);
     });
 
     const hierarchySub = db.asset_hierarchy.find().$.subscribe(docs => {
       const activeDocs = docs
         .map(doc => doc.toJSON())
-        .filter(doc => !doc.deleted);
+        .filter(doc => !doc._deleted);
       setHierarchy(activeDocs);
     });
 
@@ -437,7 +495,7 @@ export function useAssets() {
 
     // Construir jerarquía
     hierarchy.forEach(rel => {
-      if (!rel.deleted) {
+      if (!rel._deleted) {
         const parent = assetMap.get(rel.parent_id);
         const child = assetMap.get(rel.child_id);
         if (parent && child) {
