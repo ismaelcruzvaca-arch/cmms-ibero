@@ -1,18 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-  Box, AppBar, Toolbar, Typography, Container, Paper, Grid
+  Box, AppBar, Toolbar, Typography, Paper, Grid, Snackbar, Alert
 } from '@mui/material';
 import AssetTree from './components/AssetTree';
 import { NavSyncIndicator } from './components/SyncStatusIndicator';
 import { useWorkOrders } from './hooks/useWorkOrders';
+import { useAssets } from './lib/rxdb';
 import { AssetSearchBar } from './components/AssetSearchBar';
 import { AssetDetailsPanel } from './components/AssetDetailsPanel';
+import QRScannerModal from './components/QRScannerModal';
 import './App.css';
 
 function App() {
   const { loading, syncStatus, error } = useWorkOrders();
+  const { assets } = useAssets();
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // ─── Escáner QR ────────────────────────────────────────────────────
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'warning' });
+
+  const handleOpenScanner = () => setScannerOpen(true);
+  const handleCloseScanner = () => setScannerOpen(false);
+
+  const handleScanResult = useCallback((code) => {
+    const trimmed = code.trim().toUpperCase();
+    const found = assets.find((a) => a.equipment_id?.toUpperCase() === trimmed);
+
+    if (found) {
+      setSelectedAsset(found);
+      setDrawerOpen(true);
+    } else {
+      setSnackbar({
+        open: true,
+        message: `No se encontró un activo con código: ${code}`,
+        severity: 'warning',
+      });
+    }
+  }, [assets]);
 
   const handleSelectAsset = (asset) => {
     setSelectedAsset(asset);
@@ -72,7 +98,7 @@ function App() {
 
         {/* Barra de búsqueda — ancho completo */}
         <Box sx={{ mb: 3 }}>
-          <AssetSearchBar onSelectAsset={handleSelectAsset} />
+          <AssetSearchBar onSelectAsset={handleSelectAsset} onOpenScanner={handleOpenScanner} />
         </Box>
 
         {/* Layout de dos columnas en desktop */}
@@ -140,6 +166,25 @@ function App() {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
       />
+
+      {/* Escáner QR / código de barras */}
+      <QRScannerModal
+        open={scannerOpen}
+        onClose={handleCloseScanner}
+        onScan={handleScanResult}
+      />
+
+      {/* Snackbar para errores de escaneo */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={5000}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={snackbar.severity} variant="filled" sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
