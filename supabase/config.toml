@@ -1,0 +1,5 @@
+[project]
+project_id = "zbnritimnflkgihbfahb"
+
+[functions.oee-trigger]
+verify_jwt = false
