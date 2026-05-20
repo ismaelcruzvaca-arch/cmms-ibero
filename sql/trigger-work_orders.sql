@@ -1,4 +1,17 @@
 -- ============================================================
+-- DEPRECATED: Este archivo ya no debe ejecutarse en producción.
+-- ============================================================
+-- MOTIVO:
+--   La tabla work_orders utiliza updated_at BIGINT (epoch ms),
+--   no _last_modified. Los triggers nuevos (timestamp, FSM,
+--   validación, auditoría) viven en migration-work_orders-v2.sql.
+--
+-- HISTORIAL:
+--   Este script fue el trigger original para _last_modified.
+--   Se mantiene en el repo solo como referencia histórica.
+-- ============================================================
+--
+-- ============================================================
 -- TRIGGER PARA ACTUALIZAR _last_modified EN WORK ORDERS
 -- ============================================================
 -- Ejecutar este script en el SQL Editor de Supabase

@@ -8,6 +8,7 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { replicateRxCollection } from 'rxdb/plugins/replication';
 import { RxDBMigrationSchemaPlugin } from 'rxdb/plugins/migration-schema';
 import { supabase } from './supabaseClient';
+import { isValidTransition } from './fsm.js';
 
 addRxPlugin(RxDBMigrationSchemaPlugin);
 
@@ -21,7 +22,7 @@ const BATCH_SIZE = 50;
 // SCHEMAS DE RXDB (JSON puro, sin funciones)
 // ============================================
 const workOrderSchema = {
-  version: 1,
+  version: 2,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -36,9 +37,33 @@ const workOrderSchema = {
     scheduled_date: { type: 'string' },
     completed_date: { type: 'string' },
     created_at: { type: 'string' },
-    updated_at: { type: 'number' }
+    updated_at: { type: 'number' },
+    asset_id: { type: 'string', maxLength: 100 },
+    wo_type: { type: 'string', enum: ['preventive', 'corrective', 'predictive', 'emergency', 'inspection'] },
+    planned_hours: { type: 'number', minimum: 0 },
+    actual_hours: { type: 'number', minimum: 0 },
+    cost_estimate: { type: 'number', minimum: 0 },
+    actual_cost: { type: 'number', minimum: 0 },
+    requested_by: { type: 'string' },
+    approved_by: { type: 'string' },
+    approval_date: { type: 'string' },
+    start_date: { type: 'string' },
+    end_date: { type: 'string' },
+    hold_reason: { type: 'string' },
+    close_reason: { type: 'string' },
+    cancel_reason: { type: 'string' },
+    work_center: { type: 'string' },
+    planner_group: { type: 'string' },
+    downtime_hours: { type: 'number', minimum: 0 },
+    percentage_complete: { type: 'number', minimum: 0, maximum: 100 },
+    _conflict: { type: 'boolean' },
+    _deleted: { type: 'boolean' }
   },
-  required: ['id', 'equipment_id', 'description', 'status']
+  required: [
+    'id', 'equipment_id', 'description', 'status',
+    'asset_id', 'wo_type', 'planned_hours', 'actual_hours',
+    'cost_estimate', 'actual_cost', 'percentage_complete', '_conflict', '_deleted'
+  ]
 };
 
 const assetSchema = {
@@ -82,6 +107,44 @@ const assetHierarchySchema = {
   required: ['id', 'parent_id', 'child_id']
 };
 
+const workOrdersMigrationV2 = {
+  2: async (oldDoc, database) => {
+    let asset_id = '';
+    try {
+      const asset = await database.assets
+        .findOne({ selector: { equipment_id: oldDoc.equipment_id } })
+        .exec();
+      if (asset) asset_id = asset.id;
+    } catch (e) {
+      console.warn('[Migration] asset resolution failed for', oldDoc.equipment_id);
+    }
+
+    return {
+      ...oldDoc,
+      asset_id,
+      wo_type: 'corrective',
+      planned_hours: 0,
+      actual_hours: 0,
+      cost_estimate: 0,
+      actual_cost: 0,
+      requested_by: '',
+      approved_by: '',
+      approval_date: '',
+      start_date: '',
+      end_date: '',
+      hold_reason: '',
+      close_reason: '',
+      cancel_reason: '',
+      work_center: '',
+      planner_group: '',
+      downtime_hours: 0,
+      percentage_complete: 0,
+      _conflict: false,
+      _deleted: oldDoc._deleted ?? false
+    };
+  }
+};
+
 // ============================================
 // SINGLETON PATTERN
 // Evita Error DB8 en React StrictMode
@@ -99,7 +162,7 @@ async function _createDatabase() {
 
   try {
     await db.addCollections({
-      work_orders: { schema: workOrderSchema },
+      work_orders: { schema: workOrderSchema, migrationStrategies: workOrdersMigrationV2 },
       assets: { schema: assetSchema },
       asset_hierarchy: { schema: assetHierarchySchema }
     });
@@ -114,10 +177,17 @@ async function _createDatabase() {
         multiInstance: false
       });
       await newDb.addCollections({
-        work_orders: { schema: workOrderSchema },
+        work_orders: { schema: workOrderSchema, migrationStrategies: workOrdersMigrationV2 },
         assets: { schema: assetSchema },
         asset_hierarchy: { schema: assetHierarchySchema }
       });
+      newDb.work_orders.preSave((plainData, doc) => {
+        const oldStatus = doc.status;
+        const newStatus = plainData.status ?? oldStatus;
+        if (oldStatus !== newStatus && !isValidTransition(oldStatus, newStatus)) {
+          throw new Error(`FSM violation: ${oldStatus} → ${newStatus}`);
+        }
+      }, false);
       return newDb;
     }
     if (db.work_orders && db.assets && db.asset_hierarchy) {
@@ -131,6 +201,14 @@ async function _createDatabase() {
   if (!db.work_orders || !db.assets || !db.asset_hierarchy) {
     throw new Error('Colecciones no encontradas después de inicialización');
   }
+
+  db.work_orders.preSave((plainData, doc) => {
+    const oldStatus = doc.status;
+    const newStatus = plainData.status ?? oldStatus;
+    if (oldStatus !== newStatus && !isValidTransition(oldStatus, newStatus)) {
+      throw new Error(`FSM violation: ${oldStatus} → ${newStatus}`);
+    }
+  }, false);
 
   return db;
 }
@@ -188,8 +266,10 @@ function createPullHandler(tableName, orderField = 'updated_at') {
       const mappedDocs = data.map(doc => {
         const mapped = { ...doc };
 
-        // 1. Mapeo de is_deleted -> _deleted (RxDB v15 soft-delete nativo)
-        if ('is_deleted' in doc) {
+        // 1. Mapeo de _deleted / is_deleted -> _deleted (RxDB v15 soft-delete nativo)
+        if ('_deleted' in doc) {
+          mapped._deleted = !!doc._deleted;
+        } else if ('is_deleted' in doc) {
           mapped._deleted = !!doc.is_deleted;
           delete mapped.is_deleted;
         } else if ('deleted' in doc) {
@@ -276,17 +356,101 @@ function createPushHandler(tableName, fields) {
   };
 }
 
+const WORK_ORDER_PUSH_FIELDS = [
+  'id', 'equipment_id', 'description', 'location', 'criticality',
+  'status', 'priority', 'assigned_to', 'scheduled_date',
+  'completed_date', 'created_at', 'updated_at', 'asset_id', 'wo_type',
+  'planned_hours', 'actual_hours', 'cost_estimate', 'actual_cost',
+  'requested_by', 'approved_by', 'approval_date', 'start_date',
+  'end_date', 'hold_reason', 'close_reason', 'cancel_reason',
+  'work_center', 'planner_group', 'downtime_hours', 'percentage_complete',
+  '_conflict'
+];
+
+function createWorkOrderPushHandler(tableName) {
+  return async (docs) => {
+    console.log(`[RxDB Sync] Iniciando push de ${tableName}. Documentos:`, docs);
+    const upserts = docs.filter(d => !d._deleted);
+    const deletes = docs.filter(d => d._deleted);
+
+    try {
+      if (upserts.length > 0) {
+        const mappedUpserts = upserts.map(d => {
+          const obj = { _deleted: false };
+          WORK_ORDER_PUSH_FIELDS.forEach(f => {
+            if (f === 'updated_at') {
+              // updated_at is BIGINT in Supabase; send as number, no conversion
+              obj.updated_at = d.updated_at;
+            } else {
+              obj[f] = d[f];
+            }
+          });
+          return obj;
+        });
+
+        const { error } = await supabase
+          .from(tableName)
+          .upsert(mappedUpserts, { onConflict: 'id' });
+
+        if (error) {
+          const isPermanent = error.code === '23514' || error.code === 'P0001' || error.code === '23503' || error.message?.includes('Invalid status transition');
+          if (isPermanent) {
+            console.error(`[RxDB Sync] Permanent error en push de ${tableName}:`, error);
+            if (dbInstance) {
+              for (const doc of upserts) {
+                try {
+                  // Fetch server state to revert invalid status when possible
+                  const { data: serverDoc, error: serverErr } = await supabase
+                    .from(tableName)
+                    .select('status')
+                    .eq('id', doc.id)
+                    .single();
+                  const revertStatus = (!serverErr && serverDoc) ? serverDoc.status : doc.status;
+                  const localDoc = await dbInstance.work_orders.findOne(doc.id).exec();
+                  if (localDoc) {
+                    await localDoc.update({
+                      $set: { _conflict: true, status: revertStatus }
+                    });
+                  }
+                } catch (patchErr) {
+                  console.error(`[RxDB Sync] Error marcando conflicto local para ${doc.id}:`, patchErr);
+                }
+              }
+            }
+            return [];
+          }
+          throw error;
+        }
+      }
+
+      if (deletes.length > 0) {
+        const { error } = await supabase
+          .from(tableName)
+          .update({ _deleted: true })
+          .in('id', deletes.map(d => d.id));
+
+        if (error) {
+          console.error(`[RxDB Sync] Error en push delete de ${tableName}:`, error);
+          throw error;
+        }
+      }
+
+      console.log(`[RxDB Sync] Push de ${tableName} completado exitosamente`);
+      return [];
+    } catch (err) {
+      console.error(`[RxDB Sync] Excepción en push de ${tableName}:`, err);
+      throw err;
+    }
+  };
+}
+
 // ============================================
 // REPLICACIONES
 // ============================================
 export async function startAllReplications(db) {
   // Work Orders
   const woPull = createPullHandler('work_orders', 'updated_at');
-  const woPush = createPushHandler('work_orders', [
-    'id', 'equipment_id', 'description', 'location', 'criticality',
-    'status', 'priority', 'assigned_to', 'scheduled_date',
-    'completed_date', 'created_at'
-  ]);
+  const woPush = createWorkOrderPushHandler('work_orders');
 
   replicationStates.work_orders = replicateRxCollection({
     collection: db.work_orders,
@@ -344,6 +508,30 @@ export async function startAllReplications(db) {
 }
 
 // Re-sync manual
+function getPullOrderField(collectionName) {
+  if (collectionName === 'assets') return 'updated_at_ms';
+  if (collectionName === 'asset_hierarchy') return 'id';
+  return 'updated_at';
+}
+
+function getPushHandler(collectionName) {
+  if (collectionName === 'work_orders') return createWorkOrderPushHandler(collectionName);
+  if (collectionName === 'assets') {
+    return createPushHandler(collectionName, [
+      'id', 'equipment_id', 'description', 'asset_type_id', 'serial_number',
+      'status', 'location', 'site', 'resource_group', 'criticality',
+      'manufacturer', 'model_number', 'in_service_date', 'warranty_expiration',
+      'technical_specs', 'created_at'
+    ]);
+  }
+  if (collectionName === 'asset_hierarchy') {
+    return createPushHandler(collectionName, [
+      'id', 'parent_id', 'child_id', 'hierarchy_level', 'created_at'
+    ]);
+  }
+  return createPushHandler(collectionName, []);
+}
+
 export async function forceResync(collectionName) {
   const state = replicationStates[collectionName];
   if (state) {
@@ -356,8 +544,8 @@ export async function forceResync(collectionName) {
         replicationIdentifier: `cmms-${collectionName}-resync-${Date.now()}`,
         live: true,
         retryTime: 5000,
-        pull: { handler: createPullHandler(collectionName) },
-        push: { handler: createPushHandler(collectionName, []) }
+        pull: { handler: createPullHandler(collectionName, getPullOrderField(collectionName)) },
+        push: { handler: getPushHandler(collectionName) }
       });
     }
   }
