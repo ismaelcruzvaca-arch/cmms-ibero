@@ -165,16 +165,11 @@ export async function insertWorkOrder(
     id,
     asset_id: String(asset.id),
     equipment_id: asset.equipment_id,
-    description: `[OEE TRIGGER] Síntoma: ${sintoma}`,
-    status: "pending",
     wo_type: "corrective",
+    lifecycle_phase: "WAPPR",
+    block_reason: "NONE",
+    symptom_note: sintoma,
     planned_hours: 0,
-    actual_hours: 0,
-    cost_estimate: 0,
-    actual_cost: 0,
-    percentage_complete: 0,
-    _conflict: false,
-    _deleted: false,
   };
 
   const { error } = await supabase.from("work_orders").insert(workOrder);
@@ -247,6 +242,8 @@ export async function handleRequest(request: Request): Promise<Response> {
 }
 
 // ---------------------------------------------------------------------------
-// Main entrypoint
+// Main entrypoint — guarded so it doesn't fire during tests
 // ---------------------------------------------------------------------------
-Deno.serve(handleRequest);
+if (import.meta.main) {
+  Deno.serve(handleRequest);
+}

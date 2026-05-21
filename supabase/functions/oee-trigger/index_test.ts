@@ -3,6 +3,7 @@ import {
   assertExists,
   assertNotEquals,
 } from "jsr:@std/assert";
+import { createClient } from "@supabase/supabase-js";
 import { validateAuth, validatePayload, handleRequest } from "./index.ts";
 
 // =============================================================================
@@ -225,12 +226,13 @@ Deno.test({
   fn: async () => {
     Deno.env.set("OEE_SECRET_KEY", "integration-test-secret");
 
+    const sintoma = "Integration test symptom";
     const request = new Request("http://localhost", {
       method: "POST",
       headers: { Authorization: "Bearer integration-test-secret" },
       body: JSON.stringify({
         equipment_id: "TEST-EQ-001",
-        sintoma: "Integration test symptom",
+        sintoma,
       }),
     });
 
@@ -245,6 +247,26 @@ Deno.test({
       const uuidV4Regex =
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       assertEquals(uuidV4Regex.test(body.id), true);
+
+      // Query DB to verify ISO 14224 fields on the inserted work order
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+      const { data: wo, error } = await supabase
+        .from("work_orders")
+        .select("lifecycle_phase, block_reason, symptom_note, description, status")
+        .eq("id", body.id)
+        .single();
+
+      assertEquals(error, null, "DB query should succeed");
+      assertExists(wo, "work order should exist in DB");
+      assertEquals(wo.lifecycle_phase, "WAPPR");
+      assertEquals(wo.block_reason, "NONE");
+      assertEquals(wo.symptom_note, sintoma);
+      // Removed columns must not exist in new schema
+      assertEquals(wo.description, undefined, "description column was removed");
+      assertEquals(wo.status, undefined, "status column was removed");
     } else if (response.status === 404) {
       assertEquals(body.error, "Equipment not found");
     } else {
