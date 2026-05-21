@@ -1,0 +1,20 @@
+# Gentleman Guardian Angel Configuration
+# Project: cmms-ibero
+
+# AI Provider for code review
+PROVIDER="opencode"
+
+# File patterns to review (comma-separated globs)
+FILE_PATTERNS="*.jsx,*.js,*.css,*.html"
+
+# Patterns to exclude
+EXCLUDE_PATTERNS="*.test.*,*.spec.*,dist/*,node_modules/*,.git/*"
+
+# Rules file
+RULES_FILE="AGENTS.md"
+
+# Strict mode (fail on ambiguous AI responses)
+STRICT_MODE="true"
+
+# Review timeout in seconds
+TIMEOUT="300"

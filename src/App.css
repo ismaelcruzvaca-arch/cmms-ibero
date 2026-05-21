@@ -1,0 +1,11 @@
+/* App.css - Estilos de aplicación CMMS Ibero */
+/* Solo utilidades reales, sin boilerplate de Vite */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
