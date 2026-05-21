@@ -23,7 +23,7 @@ const BATCH_SIZE = 50;
 // SCHEMAS DE RXDB (JSON puro, sin funciones)
 // ============================================
 const workOrderSchema = {
-  version: 2,
+  version: 3,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -32,7 +32,15 @@ const workOrderSchema = {
     description: { type: 'string' },
     location: { type: 'string', maxLength: 100 },
     criticality: { type: 'string', enum: ['A', 'B', 'C'] },
-    status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
+    lifecycle_phase: { type: 'string', enum: ['WAPPR', 'APPROVED', 'INPRG', 'COMP', 'CLOSED'] },
+    block_reason: { type: 'string', enum: ['NONE', 'MATERIAL', 'PLANT_CONDITION', 'SCHEDULE'] },
+    failure_class: { type: 'string' },
+    problem_code: { type: 'string' },
+    cause_code: { type: 'string' },
+    remedy_code: { type: 'string' },
+    symptom_note: { type: 'string' },
+    cause_note: { type: 'string' },
+    action_note: { type: 'string' },
     priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
     assigned_to: { type: 'string' },
     scheduled_date: { type: 'string' },
@@ -61,7 +69,7 @@ const workOrderSchema = {
     _deleted: { type: 'boolean' }
   },
   required: [
-    'id', 'equipment_id', 'description', 'status',
+    'id', 'equipment_id', 'description', 'lifecycle_phase',
     'asset_id', 'wo_type', 'planned_hours', 'actual_hours',
     'cost_estimate', 'actual_cost', 'percentage_complete', '_conflict', '_deleted'
   ]
@@ -146,6 +154,30 @@ const workOrdersMigrationV2 = {
   }
 };
 
+const workOrdersMigrationV3 = {
+  3: async (oldDoc) => {
+    const phaseMap = {
+      'pending': 'WAPPR',
+      'in_progress': 'INPRG',
+      'completed': 'COMP',
+      'cancelled': 'CLOSED'
+    };
+    return {
+      ...oldDoc,
+      lifecycle_phase: phaseMap[oldDoc.status] || 'WAPPR',
+      block_reason: oldDoc.block_reason || 'NONE',
+      failure_class: oldDoc.failure_class || '',
+      problem_code: oldDoc.problem_code || '',
+      cause_code: oldDoc.cause_code || '',
+      remedy_code: oldDoc.remedy_code || '',
+      symptom_note: oldDoc.symptom_note || '',
+      cause_note: oldDoc.cause_note || '',
+      action_note: oldDoc.action_note || '',
+      status: undefined
+    };
+  }
+};
+
 // ============================================
 // SINGLETON PATTERN
 // Evita Error DB8 en React StrictMode
@@ -163,7 +195,10 @@ async function _createDatabase() {
 
   try {
     await db.addCollections({
-      work_orders: { schema: workOrderSchema, migrationStrategies: workOrdersMigrationV2 },
+      work_orders: {
+        schema: workOrderSchema,
+        migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3 }
+      },
       assets: { schema: assetSchema },
       asset_hierarchy: { schema: assetHierarchySchema }
     });
@@ -178,15 +213,18 @@ async function _createDatabase() {
         multiInstance: false
       });
       await newDb.addCollections({
-        work_orders: { schema: workOrderSchema, migrationStrategies: workOrdersMigrationV2 },
+        work_orders: {
+          schema: workOrderSchema,
+          migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3 }
+        },
         assets: { schema: assetSchema },
         asset_hierarchy: { schema: assetHierarchySchema }
       });
       newDb.work_orders.preSave((plainData, doc) => {
-        const oldStatus = doc.status;
-        const newStatus = plainData.status ?? oldStatus;
-        if (oldStatus !== newStatus && !isValidTransition(oldStatus, newStatus)) {
-          throw new Error(`FSM violation: ${oldStatus} → ${newStatus}`);
+        const oldPhase = doc.lifecycle_phase;
+        const newPhase = plainData.lifecycle_phase ?? oldPhase;
+        if (oldPhase && newPhase && oldPhase !== newPhase && !isValidTransition(oldPhase, newPhase)) {
+          throw new Error(`FSM violation: ${oldPhase} → ${newPhase}`);
         }
       }, false);
       return newDb;
@@ -204,10 +242,10 @@ async function _createDatabase() {
   }
 
   db.work_orders.preSave((plainData, doc) => {
-    const oldStatus = doc.status;
-    const newStatus = plainData.status ?? oldStatus;
-    if (oldStatus !== newStatus && !isValidTransition(oldStatus, newStatus)) {
-      throw new Error(`FSM violation: ${oldStatus} → ${newStatus}`);
+    const oldPhase = doc.lifecycle_phase;
+    const newPhase = plainData.lifecycle_phase ?? oldPhase;
+    if (oldPhase && newPhase && oldPhase !== newPhase && !isValidTransition(oldPhase, newPhase)) {
+      throw new Error(`FSM violation: ${oldPhase} → ${newPhase}`);
     }
   }, false);
 
@@ -359,7 +397,7 @@ function createPushHandler(tableName, fields) {
 
 const WORK_ORDER_PUSH_FIELDS = [
   'id', 'equipment_id', 'description', 'location', 'criticality',
-  'status', 'priority', 'assigned_to', 'scheduled_date',
+  'lifecycle_phase', 'block_reason', 'priority', 'assigned_to', 'scheduled_date',
   'completed_date', 'created_at', 'updated_at', 'asset_id', 'wo_type',
   'planned_hours', 'actual_hours', 'cost_estimate', 'actual_cost',
   'requested_by', 'approved_by', 'approval_date', 'start_date',
@@ -400,17 +438,17 @@ function createWorkOrderPushHandler(tableName) {
             if (dbInstance) {
               for (const doc of upserts) {
                 try {
-                  // Fetch server state to revert invalid status when possible
+                  // Fetch server state to revert invalid lifecycle phase when possible
                   const { data: serverDoc, error: serverErr } = await supabase
                     .from(tableName)
-                    .select('status')
+                    .select('lifecycle_phase')
                     .eq('id', doc.id)
                     .single();
-                  const revertStatus = (!serverErr && serverDoc) ? serverDoc.status : doc.status;
+                  const revertPhase = (!serverErr && serverDoc) ? serverDoc.lifecycle_phase : doc.lifecycle_phase;
                   const localDoc = await dbInstance.work_orders.findOne(doc.id).exec();
                   if (localDoc) {
                     await localDoc.update({
-                      $set: { _conflict: true, status: revertStatus }
+                      $set: { _conflict: true, lifecycle_phase: revertPhase }
                     });
                   }
                 } catch (patchErr) {

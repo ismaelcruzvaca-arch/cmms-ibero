@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
-  Box, AppBar, Toolbar, Typography, Paper, Grid, Snackbar, Alert
+  Box, AppBar, Toolbar, Typography, Paper, Grid, Snackbar, Alert, Tabs, Tab
 } from '@mui/material';
 import AssetTree from './components/AssetTree';
 import { NavSyncIndicator } from './components/SyncStatusIndicator';
@@ -9,6 +9,7 @@ import { useAssets } from './lib/rxdb';
 import { AssetSearchBar } from './components/AssetSearchBar';
 import { AssetDetailsPanel } from './components/AssetDetailsPanel';
 import QRScannerModal from './components/QRScannerModal';
+import MechanicDashboard from './pages/MechanicDashboard.jsx';
 import './App.css';
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
   const { assets } = useAssets();
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
 
   // ─── Escáner QR ────────────────────────────────────────────────────
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -77,7 +79,7 @@ function App() {
                 pl: 1.5,
               }}
             >
-              Módulo de Jerarquía de Activos
+              Módulo de Órdenes y Activos
             </Typography>
           </Box>
 
@@ -101,63 +103,86 @@ function App() {
           <AssetSearchBar onSelectAsset={handleSelectAsset} onOpenScanner={handleOpenScanner} />
         </Box>
 
-        {/* Layout de dos columnas en desktop */}
-        <Grid container spacing={3} alignItems="flex-start">
+        {/* Tabs: Órdenes de Trabajo / Activos */}
+        <Tabs
+          value={activeTab}
+          onChange={(e, v) => setActiveTab(v)}
+          sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab label="Órdenes de Trabajo" />
+          <Tab label="Activos" />
+        </Tabs>
 
-          {/* Columna principal: Árbol de activos */}
-          <Grid size={{ xs: 12, md: 8, lg: 9 }}>
-            <Paper
-              elevation={0}
-              sx={{
-                borderRadius: 3,
-                border: '1px solid #e0e0e0',
-                bgcolor: 'white',
-                overflow: 'hidden',
-              }}
-            >
-              <AssetTree onSelectAsset={handleSelectAsset} />
-            </Paper>
+        {activeTab === 0 ? (
+          <Paper
+            elevation={0}
+            sx={{
+              borderRadius: 3,
+              border: '1px solid #e0e0e0',
+              bgcolor: 'white',
+              p: 3,
+            }}
+          >
+            <MechanicDashboard />
+          </Paper>
+        ) : (
+          <Grid container spacing={3} alignItems="flex-start">
+
+            {/* Columna principal: Árbol de activos */}
+            <Grid size={{ xs: 12, md: 8, lg: 9 }}>
+              <Paper
+                elevation={0}
+                sx={{
+                  borderRadius: 3,
+                  border: '1px solid #e0e0e0',
+                  bgcolor: 'white',
+                  overflow: 'hidden',
+                }}
+              >
+                <AssetTree onSelectAsset={handleSelectAsset} />
+              </Paper>
+            </Grid>
+
+            {/* Columna lateral: Estadísticas / ayuda rápida en desktop */}
+            <Grid size={{ xs: 12, md: 4, lg: 3 }}>
+              <Paper
+                elevation={0}
+                sx={{
+                  borderRadius: 3,
+                  border: '1px solid #e0e0e0',
+                  bgcolor: 'white',
+                  p: 3,
+                }}
+              >
+                <Typography variant="subtitle2" fontWeight="700" color="primary.main" gutterBottom>
+                  💡 Cómo navegar
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
+                  Usá el <strong>buscador</strong> para localizar un equipo por su ID (ej. <code>TOS-MOT</code>) o por descripción.
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
+                  Hacé clic en cualquier nodo del árbol para expandir su jerarquía de equipos.
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
+                  Al seleccionar un equipo, se abre el <strong>panel de detalles</strong> con sus especificaciones técnicas.
+                </Typography>
+
+                <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid #f0f0f0' }}>
+                  <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 0.5 }}>
+                    Base de datos
+                  </Typography>
+                  <Typography variant="body2" fontWeight="600" color="text.primary">
+                    535 equipos indexados
+                  </Typography>
+                  <Typography variant="caption" color="text.disabled">
+                    Sincronizado desde Epicor vía Supabase
+                  </Typography>
+                </Box>
+              </Paper>
+            </Grid>
+
           </Grid>
-
-          {/* Columna lateral: Estadísticas / ayuda rápida en desktop */}
-          <Grid size={{ xs: 12, md: 4, lg: 3 }}>
-            <Paper
-              elevation={0}
-              sx={{
-                borderRadius: 3,
-                border: '1px solid #e0e0e0',
-                bgcolor: 'white',
-                p: 3,
-              }}
-            >
-              <Typography variant="subtitle2" fontWeight="700" color="primary.main" gutterBottom>
-                💡 Cómo navegar
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
-                Usá el <strong>buscador</strong> para localizar un equipo por su ID (ej. <code>TOS-MOT</code>) o por descripción.
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
-                Hacé clic en cualquier nodo del árbol para expandir su jerarquía de equipos.
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-                Al seleccionar un equipo, se abre el <strong>panel de detalles</strong> con sus especificaciones técnicas.
-              </Typography>
-
-              <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid #f0f0f0' }}>
-                <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 0.5 }}>
-                  Base de datos
-                </Typography>
-                <Typography variant="body2" fontWeight="600" color="text.primary">
-                  535 equipos indexados
-                </Typography>
-                <Typography variant="caption" color="text.disabled">
-                  Sincronizado desde Epicor vía Supabase
-                </Typography>
-              </Box>
-            </Paper>
-          </Grid>
-
-        </Grid>
+        )}
       </Box>
 
       {/* Panel lateral de detalles */}
