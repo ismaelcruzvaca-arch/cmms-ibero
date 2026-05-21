@@ -1,500 +1,238 @@
-# Work Order FSM & Schema Phase 1 — Specification
+# Work Order Database — ISO 14224 Specification
 
 ## Purpose
 
-Define the database-layer upgrade for work_orders from a basic 12-field v1 schema to an enterprise CMMS schema with FSM-enforced status transitions, referential integrity, audit trail, and retry-loop defense — without breaking offline-first replication or renaming existing states.
+Define the database-layer schema for `work_orders` aligned with ISO 14224 failure taxonomy, event-driven lifecycle management, and generic immutable audit trail. This spec replaces the previous v1/v2 schema, FSM with `status` field, and `work_order_status_history` audit table.
 
-**Scope**: Database layer ONLY. Zero UI changes.
+**Scope**: Database layer ONLY (PostgreSQL + Triggers). Zero UI changes.
 
 ---
 
-## Functional Requirements
+## Requirements
 
-### Requirement: Work Order Schema v2 (RxDB)
+### Requirement: ENUMs
 
-The system MUST bump the RxDB `work_orders` collection from schema version 1 to version 2.
+The system MUST create two PostgreSQL ENUM types:
 
-The v2 schema MUST retain all v1 fields (`id`, `equipment_id`, `description`, `location`, `criticality`, `status`, `priority`, `assigned_to`, `scheduled_date`, `completed_date`, `created_at`, `updated_at`) and MUST add the following fields:
+| ENUM | Values |
+|------|--------|
+| `lifecycle_phase` | `WAPPR`, `APPROVED`, `INPRG`, `COMP`, `CLOSED` |
+| `block_reason` | `NONE`, `MATERIAL`, `PLANT_CONDITION`, `SCHEDULE` |
 
-| Field | Type | Constraints |
-|-------|------|-------------|
-| `asset_id` | `string`, maxLength 100 | Required. References `assets.id` |
-| `wo_type` | `string` | Enum: `preventive`, `corrective`, `predictive`, `emergency`, `inspection` |
-| `planned_hours` | `number` | Non-negative |
-| `actual_hours` | `number` | Non-negative |
-| `cost_estimate` | `number` | Non-negative |
-| `actual_cost` | `number` | Non-negative |
-| `requested_by` | `string` | |
-| `approved_by` | `string` | |
-| `approval_date` | `string` | ISO 8601 date string |
-| `start_date` | `string` | ISO 8601 date string |
-| `end_date` | `string` | ISO 8601 date string |
-| `hold_reason` | `string` | |
-| `close_reason` | `string` | |
-| `cancel_reason` | `string` | |
-| `work_center` | `string` | |
-| `planner_group` | `string` | |
-| `downtime_hours` | `number` | Non-negative |
-| `percentage_complete` | `number` | Integer, minimum 0, maximum 100 |
-| `_conflict` | `boolean` | Default `false`. Set by server to break retry loops |
+`lifecycle_phase` controls the work order finite state machine. `block_reason` captures why a work order is on hold.
 
-The `updated_at` field MUST remain a `number` (epoch ms) in RxDB. `equipment_id` MUST remain as a denormalized read-only field.
+### Requirement: work_orders Table (ISO 14224)
 
-### Requirement: Supabase Migration
+The system MUST create a `work_orders` table (replacing the previous schema entirely) with the following columns:
 
-The system MUST alter the Supabase `work_orders` table with the following changes:
-
-1. Add `updated_at TIMESTAMPTZ DEFAULT NOW()` column and auto-populate it via trigger on every INSERT/UPDATE.
-2. Add `updated_at_ms BIGINT` column, auto-populated from `EXTRACT(EPOCH FROM updated_at) * 1000`, for replication ordering parity with `assets`.
-3. Add all enterprise fields listed in the schema requirement above, with matching PostgreSQL types.
-4. Add `asset_id TEXT` column with a foreign key constraint: `FOREIGN KEY (asset_id) REFERENCES assets(id)`.
-5. Keep `equipment_id` as a read-only denormalized column.
-6. Create a PostgreSQL ENUM `wo_type_enum` with values: `preventive`, `corrective`, `predictive`, `emergency`, `inspection`. Apply it to `wo_type`.
-7. Add `CHECK (percentage_complete BETWEEN 0 AND 100)`.
-8. Add `CHECK (planned_hours >= 0)`, `CHECK (actual_hours >= 0)`, etc., for all non-negative numeric fields.
-9. Add RLS policies: authenticated users can SELECT all non-deleted rows; authenticated users can INSERT/UPDATE their own rows (ownership TBD by app_id or similar claim).
-10. Add `_conflict BOOLEAN DEFAULT FALSE`.
-
-### Requirement: FSM Engine
-
-The system MUST enforce the following exact state transition matrix:
-
-| Current State | Allowed Next States |
-|---------------|---------------------|
-| `pending` | `in_progress`, `cancelled` |
-| `in_progress` | `completed`, `cancelled` |
-| `completed` | *(terminal — no transitions)* |
-| `cancelled` | *(terminal — no transitions)* |
-
-State names MUST NOT be renamed. `pending`, `in_progress`, `completed`, `cancelled` MUST be kept exactly as-is.
-
-Enforcement MUST be implemented in three layers:
-
-1. **PostgreSQL trigger** (`validate_work_order_fsm`): Before UPDATE on `work_orders`, raise an exception if the transition violates the matrix. Terminal states MUST reject any status change.
-2. **RxDB client-side validator** (in schema or hook layer): Pre-check transitions before local write to provide fail-fast UX and reduce invalid push attempts.
-3. **Conflict flag**: If an invalid state is somehow pushed and rejected by PostgreSQL, the document MUST be marked with `_conflict = true` server-side (or via a resolution mechanism) so the pull handler surfaces it and the replication retry loop is broken.
-
-### Requirement: Status Audit Trail
-
-The system MUST create a `work_order_status_history` table in Supabase with the following columns:
+#### Identity & Reference
 
 | Column | Type | Constraints |
 |--------|------|-------------|
-| `id` | `UUID PRIMARY KEY DEFAULT gen_random_uuid()` | |
-| `work_order_id` | `TEXT NOT NULL` | References `work_orders(id)` ON DELETE CASCADE |
-| `from_status` | `TEXT NOT NULL` | |
-| `to_status` | `TEXT NOT NULL` | |
-| `changed_by` | `TEXT` | Nullable. Set from application context if available |
-| `changed_at` | `TIMESTAMPTZ DEFAULT NOW()` | |
-| `reason` | `TEXT` | Nullable. Populated when transition includes a reason |
+| id | UUID | PK, DEFAULT gen_random_uuid() |
+| asset_id | UUID | FK to `assets(id)` |
+| equipment_id | VARCHAR | NOT NULL, denormalized read-only |
+| wo_type | TEXT | NOT NULL DEFAULT 'corrective' |
 
-A PostgreSQL trigger MUST auto-insert a row into `work_order_status_history` on every UPDATE of `work_orders` where `OLD.status IS DISTINCT FROM NEW.status`.
+#### Lifecycle
 
-The audit table MUST NOT live in RxDB. It is server-side only.
+| Column | Type | Constraints |
+|--------|------|-------------|
+| lifecycle_phase | lifecycle_phase | NOT NULL DEFAULT 'WAPPR' |
+| block_reason | block_reason | NOT NULL DEFAULT 'NONE' |
 
-### Requirement: RxDB v1→v2 Migration
+#### Event Timestamps (all TIMESTAMPTZ, nullable)
 
-The system MUST provide an explicit RxDB schema migration function from v1 to v2 that is safe for Dexie storage under React StrictMode.
+reported_at, approved_at, planned_start_at, actual_start_at, completed_at, closed_at, machine_down_at, machine_up_at
 
-The migration function MUST:
-1. Map existing v1 fields to v2 fields one-to-one.
-2. For `asset_id`, query the `assets` collection by `equipment_id` to resolve the corresponding `assets.id`. If no match is found, set `asset_id` to an empty string (the schema still requires it, but empty string satisfies the type constraint and signals manual backfill needed).
-3. Set all new numeric fields to `0` if absent.
-4. Set all new string fields to `""` or `null` depending on schema nullability.
-5. Set `_conflict` to `false`.
+#### ISO 14224 Failure Taxonomy (all VARCHAR, nullable)
 
-The existing recreate fallback (catching DB6/schema errors) MUST be preserved as a safety net, but MUST NOT be the primary migration path.
+| Column | Description |
+|--------|-------------|
+| failure_class | High-level failure category |
+| problem_code | Observed problem code |
+| cause_code | Root cause code |
+| remedy_code | Applied remedy code |
 
-### Requirement: Replication Alignment
+#### Operational Context (all VARCHAR, nullable)
 
-The system MUST update the work_orders replication handlers to use `updated_at_ms` for ordering (like `assets`), resolving the latent mismatch where the pull handler ordered by `updated_at` but the Supabase table had `_last_modified`.
+| Column | Description |
+|--------|-------------|
+| criticality | Asset criticality classification |
+| asset_class | Asset class or category |
+| part_in_process | Part or sub-process involved |
 
-The push handler MUST include all v2 fields in the field list and MUST send both `updated_at` (ISO string) and `updated_at_ms` (number) to Supabase.
+#### Structured Notes (all TEXT, nullable)
 
-The pull handler MUST map `updated_at_ms` to the RxDB `updated_at` number field.
+| Column | Description |
+|--------|-------------|
+| symptom_note | Observed symptom description |
+| cause_note | Root cause description |
+| action_note | Action taken description |
+
+#### Metadata
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| created_at | TIMESTAMPTZ | DEFAULT NOW() |
+| created_by | UUID | Nullable, references auth.users |
+| updated_at | TIMESTAMPTZ | DEFAULT NOW() |
+
+**REMOVED columns** (no longer exist in the schema): `status`, `description`, `actual_hours`, `cost_estimate`, `actual_cost`, `percentage_complete`, `_conflict`, `_deleted`.
+
+#### Scenario: Work order created with WAPPR lifecycle
+
+- GIVEN a valid authenticated request
+- WHEN a work order is INSERTed
+- THEN lifecycle_phase SHALL default to `'WAPPR'`
+- AND block_reason SHALL default to `'NONE'`
+- AND created_at and updated_at SHALL be set
+
+#### Scenario: Machine downtime captured
+
+- GIVEN a work order in lifecycle_phase `INPRG`
+- WHEN machine_down_at is set
+- THEN the update SHALL succeed
+- AND downtime calculation SHALL be possible via `machine_up_at - machine_down_at`
+
+#### Scenario: Structured notes populated
+
+- GIVEN a valid authenticated request with symptom text
+- WHEN `symptom_note` is set to a non-empty string
+- THEN the value SHALL persist without truncation
+
+### Requirement: Lifecycle FSM
+
+The system MUST enforce a finite state machine on `lifecycle_phase` via a BEFORE UPDATE trigger. The FSM SHALL enforce strictly linear forward-only transitions:
+
+```
+WAPPR → APPROVED → INPRG → COMP → CLOSED
+```
+
+**Transition rules:**
+1. Only forward transitions are allowed (no backward moves).
+2. No skips are allowed (e.g., WAPPR → INPRG is invalid).
+3. Identity transitions (same → same) MUST be allowed and MUST NOT raise an error.
+4. Terminal state (`CLOSED`) MUST reject any further phase changes.
+5. The trigger MUST use `OLD.lifecycle_phase` and `NEW.lifecycle_phase` for validation.
+
+#### Scenario: Lifecycle transition APPROVED → INPRG
+
+- GIVEN a work order with lifecycle_phase = `APPROVED`
+- WHEN a TECHNICIAN sets lifecycle_phase to `INPRG` and actual_start_at to NOW()
+- THEN the update SHALL succeed
+- AND the FSM trigger SHALL allow the transition
+
+#### Scenario: Lifecycle transition COMP → WAPPR (invalid)
+
+- GIVEN a work order with lifecycle_phase = `COMP`
+- WHEN a user attempts to set lifecycle_phase to `WAPPR`
+- THEN the FSM trigger SHALL raise an exception and roll back the update
+
+### Requirement: Audit Trail
+
+The system MUST create a generic, immutable audit trail table and trigger function.
+
+#### audit_logs Table
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, DEFAULT gen_random_uuid() |
+| table_name | TEXT | NOT NULL |
+| record_id | UUID | NOT NULL |
+| action | TEXT | NOT NULL, CHECK (action IN ('INSERT','UPDATE','DELETE')) |
+| old_data | JSONB | Nullable |
+| new_data | JSONB | Nullable |
+| changed_by | UUID | FK to auth.users |
+| changed_at | TIMESTAMPTZ | DEFAULT NOW() |
+
+#### Generic audit_trigger_func()
+
+The function MUST be generic — using `TG_TABLE_NAME`, `OLD`, and `NEW` — NOT hardcoded to any specific table. This allows applying audit to any future table by simply creating a trigger.
+
+The trigger on `work_orders` MUST capture INSERT, UPDATE, and DELETE operations.
+
+**RLS on audit_logs:**
+- INSERT is allowed only via SECURITY DEFINER trigger (not direct user INSERT)
+- SELECT is allowed for ADMIN only
+- No UPDATE or DELETE policies exist (table is append-only)
+
+#### Scenario: UPDATE captured in audit_logs
+
+- GIVEN a work order with lifecycle_phase `WAPPR`
+- WHEN a TECHNICIAN updates lifecycle_phase to `INPRG`
+- THEN a row SHALL be inserted into `audit_logs` with action `UPDATE`, old_data containing the previous row, new_data containing the current row, and changed_by set to the TECHNICIAN's UUID
+
+#### Scenario: DELETE captured in audit_logs
+
+- GIVEN an existing work order
+- WHEN an ADMIN deletes it
+- THEN a row SHALL be inserted into `audit_logs` with action `DELETE`, old_data containing the deleted row, and new_data set to NULL
+
+#### Scenario: Generic trigger reused
+
+- GIVEN a future table `inspections`
+- WHEN the generic `audit_trigger()` is applied to `inspections`
+- THEN INSERT, UPDATE, DELETE on `inspections` SHALL produce audit_logs rows without code changes
 
 ---
 
 ## Non-Functional Requirements
 
-- **Offline-first integrity**: FSM rules MUST be enforceable client-side so that offline users cannot create locally invalid states that will stall sync indefinitely.
-- **Migration safety**: The v1→v2 migration MUST be idempotent and MUST NOT drop data. If migration fails, the recreate fallback MUST restore data from Supabase on next pull.
-- **Review budget protection**: This change targets the database layer only. Hook and UI changes are deferred to Phase 2 to keep the PR under the 400-line review budget.
-- **Audit immutability**: `work_order_status_history` rows MUST be insert-only. No UPDATE or DELETE operations should be permitted on this table (enforced by RLS or trigger).
+- **Data integrity**: FSM enforcement MUST happen at the database level (trigger), not just in application code.
+- **Audit immutability**: `audit_logs` rows MUST be insert-only. No UPDATE or DELETE operations permitted.
+- **Extensibility**: The `audit_trigger_func()` MUST be generic and reusable across any table without code changes.
+- **Schema clarity**: The destructive migration (DROP + CREATE) is intentional — backward-incompatible by design.
 
 ---
 
-## Scenarios
+## Data Model Summary
 
-### Happy Path Scenarios
-
-#### Scenario: Create a new work order with enterprise fields
-
-- GIVEN a clean RxDB v2 database synced to Supabase
-- WHEN a work order is inserted with `asset_id`, `wo_type`, `planned_hours`, `cost_estimate`, `requested_by`, `work_center`, and `percentage_complete: 0`
-- THEN the document is stored locally with all fields
-- AND it is pushed to Supabase with `updated_at` and `updated_at_ms` populated
-- AND `asset_id` passes the foreign key constraint
-
-#### Scenario: Valid status transition pending → in_progress
-
-- GIVEN a work order with status `pending`
-- WHEN its status is updated to `in_progress` with `start_date` set
-- THEN the local write succeeds (client-side validation passes)
-- AND the push succeeds (PostgreSQL trigger allows the transition)
-- AND a row is inserted into `work_order_status_history` with `from_status='pending'`, `to_status='in_progress'`
-
-#### Scenario: Valid status transition in_progress → completed
-
-- GIVEN a work order with status `in_progress`
-- WHEN its status is updated to `completed` with `end_date` and `close_reason` set
-- THEN the local write succeeds
-- AND the push succeeds
-- AND a row is inserted into `work_order_status_history`
-
-#### Scenario: RxDB v1→v2 migration backfills asset_id
-
-- GIVEN an existing v1 work order with `equipment_id = 'EQ-001'`
-- AND an asset exists with `equipment_id = 'EQ-001'` and `id = 'ASSET-001'`
-- WHEN the migration function runs
-- THEN the resulting v2 document has `asset_id = 'ASSET-001'`
-- AND all new fields have safe defaults
-
-### Edge Case Scenarios
-
-#### Scenario: Migration with orphaned equipment_id
-
-- GIVEN an existing v1 work order with `equipment_id = 'EQ-999'`
-- AND no asset exists with that `equipment_id`
-- WHEN the migration function runs
-- THEN `asset_id` is set to `""`
-- AND the document migrates successfully
-- AND a warning is logged
-
-#### Scenario: Offline status change followed by valid sync
-
-- GIVEN the client is offline
-- AND a work order has status `pending`
-- WHEN the user changes status to `in_progress` offline
-- AND later comes online
-- THEN the push succeeds because the transition is valid
-
-#### Scenario: Duplicate status update (no-op)
-
-- GIVEN a work order with status `in_progress`
-- WHEN an update sets status to `in_progress` again (no actual change)
-- THEN the PostgreSQL FSM trigger allows it (status unchanged)
-- AND no row is inserted into `work_order_status_history`
-
-### Error Case Scenarios
-
-#### Scenario: Invalid status transition rejected locally
-
-- GIVEN a work order with status `completed`
-- WHEN a client-side update attempts to set status to `pending`
-- THEN the local write is rejected BEFORE touching RxDB
-- AND an error is returned indicating the transition is invalid
-
-#### Scenario: Invalid status transition rejected by PostgreSQL
-
-- GIVEN a work order in Supabase with status `cancelled`
-- WHEN a direct SQL UPDATE or bypass attempt sets status to `in_progress`
-- THEN the PostgreSQL trigger raises an exception
-- AND the transaction is rolled back
-
-#### Scenario: Sync retry loop broken by conflict flag
-
-- GIVEN a document with an invalid status was written offline before client-side validation existed
-- WHEN the push handler sends it to Supabase
-- AND Supabase rejects it with an FSM violation
-- AND replication retries indefinitely
-- THEN a server-side process or manual resolution marks the document `_conflict = true`
-- AND the next pull surfaces `_conflict: true` to the client
-- AND the client handler stops retrying the invalid state
-
-#### Scenario: Negative planned_hours rejected
-
-- GIVEN a work order update with `planned_hours: -5`
-- WHEN the push reaches Supabase
-- THEN the `CHECK (planned_hours >= 0)` constraint rejects the write
-- AND the client receives an error
-
----
-
-## Data Model Specification
-
-### RxDB Schema v2
-
-```javascript
-const workOrderSchemaV2 = {
-  version: 2,
-  primaryKey: 'id',
-  type: 'object',
-  properties: {
-    // v1 fields (retained)
-    id: { type: 'string', maxLength: 50 },
-    equipment_id: { type: 'string', maxLength: 50 },
-    description: { type: 'string' },
-    location: { type: 'string', maxLength: 100 },
-    criticality: { type: 'string', enum: ['A', 'B', 'C'] },
-    status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
-    priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
-    assigned_to: { type: 'string' },
-    scheduled_date: { type: 'string' },
-    completed_date: { type: 'string' },
-    created_at: { type: 'string' },
-    updated_at: { type: 'number' },
-
-    // v2 fields (new)
-    asset_id: { type: 'string', maxLength: 100 },
-    wo_type: { type: 'string', enum: ['preventive', 'corrective', 'predictive', 'emergency', 'inspection'] },
-    planned_hours: { type: 'number', minimum: 0 },
-    actual_hours: { type: 'number', minimum: 0 },
-    cost_estimate: { type: 'number', minimum: 0 },
-    actual_cost: { type: 'number', minimum: 0 },
-    requested_by: { type: 'string' },
-    approved_by: { type: 'string' },
-    approval_date: { type: 'string' },
-    start_date: { type: 'string' },
-    end_date: { type: 'string' },
-    hold_reason: { type: 'string' },
-    close_reason: { type: 'string' },
-    cancel_reason: { type: 'string' },
-    work_center: { type: 'string' },
-    planner_group: { type: 'string' },
-    downtime_hours: { type: 'number', minimum: 0 },
-    percentage_complete: { type: 'number', minimum: 0, maximum: 100 },
-
-    // replication / conflict
-    _conflict: { type: 'boolean' },
-    _deleted: { type: 'boolean' }
-  },
-  required: [
-    'id', 'equipment_id', 'description', 'status', 'asset_id',
-    'wo_type', 'planned_hours', 'actual_hours', 'cost_estimate', 'actual_cost',
-    'percentage_complete', '_conflict', '_deleted'
-  ]
-};
 ```
+work_orders
+├── id UUID PK
+├── asset_id UUID FK → assets(id)
+├── equipment_id VARCHAR
+├── wo_type TEXT
+├── lifecycle_phase lifecycle_phase ENUM
+├── block_reason block_reason ENUM
+├── [8 timestamps] TIMESTAMPTZ
+├── [4 failure taxonomy codes] VARCHAR
+├── [3 operational context fields] VARCHAR
+├── [3 structured notes] TEXT
+└── created_at / created_by / updated_at
 
-**Migration function v1→v2** (conceptual):
-- Copy all v1 fields directly.
-- Resolve `asset_id` via `assets.findOne({ selector: { equipment_id: doc.equipment_id } })`.
-- Default `wo_type` to `'corrective'`.
-- Default numeric fields to `0`.
-- Default string fields to `""`.
-- Set `_conflict: false`, `_deleted: false`.
-
-### Supabase DDL
-
-```sql
--- 1. ENUMs
-CREATE TYPE wo_type_enum AS ENUM ('preventive', 'corrective', 'predictive', 'emergency', 'inspection');
-
--- 2. Add columns to work_orders
-ALTER TABLE work_orders
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(),
-  ADD COLUMN IF NOT EXISTS updated_at_ms BIGINT,
-  ADD COLUMN IF NOT EXISTS asset_id TEXT,
-  ADD COLUMN IF NOT EXISTS wo_type wo_type_enum DEFAULT 'corrective',
-  ADD COLUMN IF NOT EXISTS planned_hours NUMERIC DEFAULT 0 CHECK (planned_hours >= 0),
-  ADD COLUMN IF NOT EXISTS actual_hours NUMERIC DEFAULT 0 CHECK (actual_hours >= 0),
-  ADD COLUMN IF NOT EXISTS cost_estimate NUMERIC DEFAULT 0 CHECK (cost_estimate >= 0),
-  ADD COLUMN IF NOT EXISTS actual_cost NUMERIC DEFAULT 0 CHECK (actual_cost >= 0),
-  ADD COLUMN IF NOT EXISTS requested_by TEXT,
-  ADD COLUMN IF NOT EXISTS approved_by TEXT,
-  ADD COLUMN IF NOT EXISTS approval_date TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS end_date TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS hold_reason TEXT,
-  ADD COLUMN IF NOT EXISTS close_reason TEXT,
-  ADD COLUMN IF NOT EXISTS cancel_reason TEXT,
-  ADD COLUMN IF NOT EXISTS work_center TEXT,
-  ADD COLUMN IF NOT EXISTS planner_group TEXT,
-  ADD COLUMN IF NOT EXISTS downtime_hours NUMERIC DEFAULT 0 CHECK (downtime_hours >= 0),
-  ADD COLUMN IF NOT EXISTS percentage_complete INTEGER DEFAULT 0 CHECK (percentage_complete BETWEEN 0 AND 100),
-  ADD COLUMN IF NOT EXISTS _conflict BOOLEAN DEFAULT FALSE;
-
--- 3. Foreign key
-ALTER TABLE work_orders
-  ADD CONSTRAINT fk_work_orders_asset
-  FOREIGN KEY (asset_id) REFERENCES assets(id);
-
--- 4. Trigger: update timestamps
-CREATE OR REPLACE FUNCTION update_work_order_timestamps()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at := NOW();
-  NEW.updated_at_ms := (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS work_orders_timestamp ON work_orders;
-CREATE TRIGGER work_orders_timestamp
-  BEFORE INSERT OR UPDATE ON work_orders
-  FOR EACH ROW
-  EXECUTE FUNCTION update_work_order_timestamps();
-
--- 5. Trigger: FSM validation
-CREATE OR REPLACE FUNCTION validate_work_order_fsm()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF OLD.status = NEW.status THEN
-    RETURN NEW;
-  END IF;
-
-  IF OLD.status IN ('completed', 'cancelled') THEN
-    RAISE EXCEPTION 'Invalid transition: % is a terminal state', OLD.status;
-  END IF;
-
-  IF OLD.status = 'pending' AND NEW.status NOT IN ('in_progress', 'cancelled') THEN
-    RAISE EXCEPTION 'Invalid transition from pending to %', NEW.status;
-  END IF;
-
-  IF OLD.status = 'in_progress' AND NEW.status NOT IN ('completed', 'cancelled') THEN
-    RAISE EXCEPTION 'Invalid transition from in_progress to %', NEW.status;
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS work_orders_fsm ON work_orders;
-CREATE TRIGGER work_orders_fsm
-  BEFORE UPDATE ON work_orders
-  FOR EACH ROW
-  EXECUTE FUNCTION validate_work_order_fsm();
-
--- 6. Audit table
-CREATE TABLE IF NOT EXISTS work_order_status_history (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  work_order_id TEXT NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
-  from_status TEXT NOT NULL,
-  to_status TEXT NOT NULL,
-  changed_by TEXT,
-  changed_at TIMESTAMPTZ DEFAULT NOW(),
-  reason TEXT
-);
-
--- 7. Trigger: audit logging
-CREATE OR REPLACE FUNCTION log_work_order_status_change()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF OLD.status IS DISTINCT FROM NEW.status THEN
-    INSERT INTO work_order_status_history (work_order_id, from_status, to_status, reason)
-    VALUES (NEW.id, OLD.status, NEW.status, COALESCE(NEW.cancel_reason, NEW.close_reason, NEW.hold_reason));
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS work_orders_audit ON work_orders;
-CREATE TRIGGER work_orders_audit
-  AFTER UPDATE ON work_orders
-  FOR EACH ROW
-  EXECUTE FUNCTION log_work_order_status_change();
-
--- 8. RLS
-ALTER TABLE work_orders ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS work_orders_select ON work_orders;
-CREATE POLICY work_orders_select ON work_orders
-  FOR SELECT TO authenticated USING (_deleted = FALSE OR _deleted IS NULL);
-
-DROP POLICY IF EXISTS work_orders_insert ON work_orders;
-CREATE POLICY work_orders_insert ON work_orders
-  FOR INSERT TO authenticated WITH CHECK (true);
-
-DROP POLICY IF EXISTS work_orders_update ON work_orders;
-CREATE POLICY work_orders_update ON work_orders
-  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
-
--- 9. Backfill existing rows
-UPDATE work_orders SET updated_at = NOW(), updated_at_ms = (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint WHERE updated_at IS NULL;
-UPDATE work_orders SET _conflict = FALSE WHERE _conflict IS NULL;
+audit_logs
+├── id UUID PK
+├── table_name TEXT
+├── record_id UUID
+├── action TEXT (INSERT|UPDATE|DELETE)
+├── old_data JSONB
+├── new_data JSONB
+├── changed_by UUID FK
+└── changed_at TIMESTAMPTZ
 ```
 
 ---
 
-## FSM Specification
+## Migration Strategy
 
-### States
+The migration uses a destructive approach (Opción A) in two sequential Supabase migrations:
 
-| State | Type | Description |
-|-------|------|-------------|
-| `pending` | Initial | Work order created, awaiting start |
-| `in_progress` | Active | Work being performed |
-| `completed` | Terminal | Work finished successfully |
-| `cancelled` | Terminal | Work aborted |
-
-### Transition Matrix
-
-```
-          pending    in_progress    completed    cancelled
-pending      —          OK            NO           OK
-in_progress  NO         —             OK           OK
-completed    NO         NO            —            NO
-cancelled    NO         NO            NO           —
-```
-
-### Validation Rules
-
-1. **Identity transitions** (same state → same state) MUST be allowed and MUST NOT create audit entries.
-2. **Terminal states** (`completed`, `cancelled`) MUST reject ALL status changes.
-3. **Invalid transitions** MUST be rejected by client-side code before write, by PostgreSQL trigger on server write, and MUST NOT silently succeed.
-4. **Transition reasons**:
-   - `pending` → `cancelled`: `cancel_reason` SHOULD be populated.
-   - `in_progress` → `completed`: `close_reason` MAY be populated.
-   - `in_progress` → `cancelled`: `cancel_reason` SHOULD be populated.
-
----
-
-## Migration Plan
-
-### RxDB v1→v2
-
-1. Bump `version: 1` to `version: 2` in `workOrderSchema`.
-2. Add `migrationStrategies: { 2: async (oldDoc) => ({ ... }) }` to the collection config.
-3. The migration function MUST be async and MUST resolve `asset_id` by querying the `assets` collection.
-4. Preserve the existing `catch(err)` recreate fallback in `_createDatabase` for StrictMode safety.
-5. Update `createPushHandler` field list to include all v2 fields.
-6. Update `createPullHandler` for `work_orders` to order by `updated_at_ms` (matching assets pattern).
-
-### Supabase Migration
-
-1. Execute the DDL script above in a single Supabase migration file.
-2. Backfill `updated_at`, `updated_at_ms`, and `_conflict` on existing rows.
-3. Verify the `asset_id` backfill separately (manual or scripted) for rows where `equipment_id` has a matching asset.
-4. Update `_last_modified` trigger to coexist with `updated_at` triggers, or deprecate `_last_modified` in favor of `updated_at_ms`.
-
-### Rollback
-
-- Supabase: Run inverse DDL (drop columns, triggers, tables, type). Restore `_last_modified` as primary ordering field if needed.
-- RxDB: If v2 migration fails catastrophically, the recreate fallback restores empty v2 schema; data is re-downloaded from Supabase pull.
+1. **Migration 1** (`rbac_audit`): ENUMs, `user_profiles`, `audit_logs`, generic `audit_trigger_func()`, `get_user_role()` helper, base RLS.
+2. **Migration 2** (`work_orders_iso14224`): DROP old `work_orders` CASCADE, CREATE new ISO 14224 table, FSM trigger, re-attach audit trigger, RLS policies.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Supabase `work_orders` table has `updated_at`, `updated_at_ms`, all 18 new enterprise fields, `_conflict`, and `asset_id` FK.
-- [ ] `wo_type` uses PostgreSQL ENUM `wo_type_enum`.
-- [ ] RxDB v2 schema matches the specification and migrates existing v1 documents without data loss.
-- [ ] Invalid transitions (`completed` → `pending`, `cancelled` → `in_progress`, `pending` → `completed`) are rejected by both client-side code and PostgreSQL trigger.
-- [ ] Valid transitions (`pending` → `in_progress`, `in_progress` → `completed`, `pending` → `cancelled`) succeed end-to-end.
-- [ ] Every status change creates exactly one row in `work_order_status_history`.
-- [ ] No audit row is created for no-op status updates (same → same).
-- [ ] RLS SELECT policy hides soft-deleted rows from authenticated queries.
-- [ ] Replication pull handler orders by `updated_at_ms` without error.
-- [ ] `_conflict = true` on a document stops infinite replication retry.
-- [ ] The change set is database-layer only — no UI files modified.
-
----
-
-## Related Artifacts
-
-- Proposal: `openspec/changes/work-order-fsm-schema-phase-1/proposal.md`
-- Exploration: `openspec/changes/work-order-fsm-schema-phase-1/explore.md`
-- Current schema: `src/lib/rxdb.js`
-- Current hooks: `src/hooks/useWorkOrders.js`
-- Current SQL: `sql/trigger-work_orders.sql`
+- [ ] `lifecycle_phase` ENUM `('WAPPR','APPROVED','INPRG','COMP','CLOSED')` created and applied
+- [ ] `block_reason` ENUM `('NONE','MATERIAL','PLANT_CONDITION','SCHEDULE')` created and applied
+- [ ] `work_orders` table has all ISO 14224 columns (no legacy columns like `status`, `description`, etc.)
+- [ ] FSM trigger enforces linear transitions: WAPPR → APPROVED → INPRG → COMP → CLOSED (no skips, no backward moves)
+- [ ] All 8 timestamps are TIMESTAMPTZ, nullable
+- [ ] `audit_logs` table exists with generic trigger function
+- [ ] `audit_trigger_func()` is generic — uses TG_TABLE_NAME, OLD, NEW
+- [ ] Trigger `work_orders_audit` is installed on work_orders for INSERT/UPDATE/DELETE
+- [ ] Audit rows are immutable — no UPDATE or DELETE policies on audit_logs
+- [ ] RLS on `audit_logs` allows INSERT via trigger (not user), SELECT for ADMIN only

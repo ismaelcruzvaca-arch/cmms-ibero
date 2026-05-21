@@ -71,20 +71,29 @@ The endpoint MUST resolve the provided `equipment_id` to a single existing asset
 Upon successful authentication, payload validation, and asset resolution, the endpoint MUST create a work order with the following properties:
 
 - `asset_id`: the resolved asset identifier
-- `description`: `[OEE TRIGGER] Síntoma: <sintoma>` where `<sintoma>` is the provided symptom text
-- `status`: `'pending'`
+- `lifecycle_phase`: `'WAPPR'`
+- `block_reason`: `'NONE'`
+- `symptom_note`: the value of `sintoma` from the payload
 - `wo_type`: `'corrective'`
-- All required numeric fields SHALL default to `0`
-- All required boolean fields SHALL default to `false`
+
+The `sintoma` field SHALL map directly to `symptom_note` (not to `description`, which no longer exists).
 
 #### Scenario: Successful work order creation
 
 - GIVEN a valid authenticated request with a valid payload and existing `equipment_id`
 - WHEN the endpoint processes the request
 - THEN a work order SHALL be created with the resolved `asset_id`
-- AND `description` SHALL include the symptom text and indicate an OEE trigger origin
-- AND `status` SHALL be `'pending'`
+- AND `lifecycle_phase` SHALL be `'WAPPR'`
+- AND `block_reason` SHALL be `'NONE'`
+- AND `symptom_note` SHALL contain the `sintoma` text
+- AND `description` SHALL NOT be set (column removed)
 - AND `wo_type` SHALL be `'corrective'`
+
+#### Scenario: OEE trigger with missing sintoma
+
+- GIVEN a valid authenticated request with `equipment_id` but empty `sintoma`
+- WHEN the endpoint processes the request
+- THEN it SHALL respond with HTTP 400 (sintoma is required for symptom_note)
 
 ### Requirement: Response Format
 
