@@ -2,15 +2,43 @@
  * Hook personalizado para Work Orders con RxDB
  * Expone datos reactivos y estado de sincronización
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { initRxDB, startReplication } from '../lib/rxdb';
 
-export function useWorkOrders() {
+export function useWorkOrders({ lifecycleFilter = null } = {}) {
   const [workOrders, setWorkOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [syncStatus, setSyncStatus] = useState('offline');
   const [db, setDb] = useState(null);
+  const filterRef = useRef(lifecycleFilter);
+
+  // Sincronizar el ref con el valor actual del filtro
+  // La subscripción reactiva leerá siempre filterRef.current
+  useEffect(() => { filterRef.current = lifecycleFilter; }, [lifecycleFilter]);
+
+  // Re-filtrar cuando cambie el lifecycleFilter sin reiniciar la replicación
+  useEffect(() => {
+    if (!db || !db.work_orders) return;
+
+    const reFilter = async () => {
+      try {
+        const docs = await db.work_orders.find().exec();
+        const currentFilter = filterRef.current;
+        const filtered = docs
+          .map(d => d.toJSON())
+          .filter(d => !d._deleted)
+          .filter(d => {
+            if (!currentFilter) return true;
+            return currentFilter.includes(d.lifecycle_phase);
+          });
+        setWorkOrders(filtered);
+      } catch (err) {
+        console.warn('[useWorkOrders] Re-filter error:', err);
+      }
+    };
+    reFilter();
+  }, [db, lifecycleFilter]);
 
   useEffect(() => {
     let subscription = null;
@@ -54,7 +82,12 @@ export function useWorkOrders() {
           
           const activeDocs = initialDocs
             .map(doc => doc.toJSON())
-            .filter(doc => !doc.is_deleted);
+            .filter(doc => !doc._deleted)
+            .filter(doc => {
+              const currentFilter = filterRef.current;
+              if (!currentFilter) return true;
+              return currentFilter.includes(doc.lifecycle_phase);
+            });
             
           setWorkOrders(activeDocs);
         } catch (queryErr) {
@@ -65,9 +98,14 @@ export function useWorkOrders() {
         subscription = collection.find().$.subscribe({
           next: (docs) => {
             try {
+              const currentFilter = filterRef.current;
               const activeDocs = docs
                 .map(doc => doc.toJSON())
-                .filter(doc => !doc.is_deleted);
+                .filter(doc => !doc._deleted)
+                .filter(doc => {
+                  if (!currentFilter) return true;
+                  return currentFilter.includes(doc.lifecycle_phase);
+                });
               setWorkOrders(activeDocs);
             } catch (e) {
               console.error('[useWorkOrders] Error procesando docs:', e);
@@ -93,10 +131,10 @@ export function useWorkOrders() {
 
     return () => {
       if (subscription) {
-        try { subscription.unsubscribe(); } catch (e) { /* ignorado */ }
+        try { subscription.unsubscribe(); } catch { /* ignorado */ }
       }
       if (repState) {
-        try { repState.cancel(); } catch (e) { /* ignorado */ }
+        try { repState.cancel(); } catch { /* ignorado */ }
       }
     };
   }, []);
@@ -112,7 +150,7 @@ export function useWorkOrders() {
         id: workOrder.id || `WO-${Date.now()}`,
         created_at: new Date().toISOString(),
         updated_at: Date.now(),
-        is_deleted: false
+        _deleted: false
       });
       return { success: true };
     } catch (err) {
@@ -147,7 +185,7 @@ export function useWorkOrders() {
       const collection = db.work_orders;
       const doc = await collection.findOne(id).exec();
       if (doc) {
-        await doc.update({ $set: { is_deleted: true, updated_at: Date.now() } });
+        await doc.update({ $set: { _deleted: true, updated_at: Date.now() } });
         return { success: true };
       }
       return { error: 'Document not found' };
