@@ -30,3 +30,9 @@ dist-ssr
 
 # Test results
 test-results/
+
+# Deno lock files (root level — function-level is tracked)
+deno.lock
+
+# Supabase CLI temp files
+supabase/.temp/
