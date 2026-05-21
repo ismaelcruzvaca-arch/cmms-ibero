@@ -37,4 +37,22 @@ export function toViewModelList(docs) {
   return docs.map(toViewModel);
 }
 
+/**
+ * Valida las notas técnicas requeridas para la transición INPRG → COMP.
+ * @param {{ symptom_note?: string, cause_note?: string, action_note?: string }} notes
+ * @returns {{ valid: boolean, errors: { symptom_note?: string, action_note?: string } }}
+ */
+export function validateCompletion(notes) {
+  const errors = {};
+
+  if (!notes?.symptom_note?.trim()) {
+    errors.symptom_note = 'Este campo es obligatorio';
+  }
+  if (!notes?.action_note?.trim()) {
+    errors.action_note = 'Este campo es obligatorio';
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
 export default toViewModel;

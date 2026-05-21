@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -6,17 +7,34 @@ import { useWorkOrders } from '../hooks/useWorkOrders';
 import { toViewModelList } from '../lib/adapters/workOrderAdapter.js';
 import { NavSyncIndicator } from '../components/SyncStatusIndicator.jsx';
 import WorkOrderList from '../components/mechanic/WorkOrderList.jsx';
+import WorkOrderDrawer from '../components/mechanic/WorkOrderDrawer.jsx';
 
 export default function MechanicDashboard() {
-  const { workOrders, loading, error, syncStatus } = useWorkOrders({
+  const { workOrders, loading, error, syncStatus, updateWorkOrder } = useWorkOrders({
     lifecycleFilter: ['WAPPR', 'APPROVED']
   });
 
   const viewModels = toViewModelList(workOrders);
 
-  const handleSelect = (id) => {
-    console.log('[MechanicDashboard] Work order selected:', id);
-  };
+  // Drawer state
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const handleSelect = useCallback((id) => {
+    const found = viewModels.find(vm => vm.id === id);
+    if (found) {
+      setSelectedWorkOrder(found);
+      setDrawerOpen(true);
+    }
+  }, [viewModels]);
+
+  const handleCloseDrawer = useCallback(() => {
+    setDrawerOpen(false);
+  }, []);
+
+  const handleTransition = useCallback(async (id, updates) => {
+    return await updateWorkOrder(id, updates);
+  }, [updateWorkOrder]);
 
   if (loading) {
     return (
@@ -43,6 +61,15 @@ export default function MechanicDashboard() {
         <NavSyncIndicator status={syncStatus} />
       </Box>
       <WorkOrderList workOrders={viewModels} onSelect={handleSelect} />
+
+      {selectedWorkOrder && (
+        <WorkOrderDrawer
+          workOrder={selectedWorkOrder}
+          open={drawerOpen}
+          onClose={handleCloseDrawer}
+          onTransition={handleTransition}
+        />
+      )}
     </Box>
   );
 }
