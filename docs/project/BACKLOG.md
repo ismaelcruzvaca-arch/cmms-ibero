@@ -1,6 +1,6 @@
 # Backlog Técnico — CMMS Ibero
 
-> Última actualización: 2026-05-21
+> Última actualización: 2026-05-22
 
 ---
 
@@ -47,6 +47,25 @@
 ---
 
 ## [DEUDA TÉCNICA - INFRAESTRUCTURA]
+
+### CRÍTICO: Schema Drift — Producción vs Repositorio (ISO 14224)
+
+**Descripción**: La tabla `work_orders` en producción mantiene un esquema legacy (status VARCHAR, id TEXT, columnas RxDB como `_conflict`, `_deleted`) mientras que el repositorio está alineado al estándar ISO 14224 (lifecycle_phase ENUM, id UUID, timestamps operativos, taxonomía de fallas).
+
+**Riesgo**: El motor PM (`generate_due_preventive_work_orders()`) requiere `lifecycle_phase`, `job_plan_id` y `symptom_note` — columnas que no existen en producción. Desplegar el motor PM sin migrar el schema producirá errores en caliente.
+
+**Acción requerida**: Planificar una migración de datos controlada que:
+- Transforme `status` → `lifecycle_phase` con mapeo uno a uno
+- Migre `id` de `TEXT` → `UUID` conservando valores existentes
+- Remueva columnas legacy de RxDB (`_conflict`, `_deleted`, `updated_at` como BIGINT)
+- Agregue columnas ISO 14224 faltantes (15+ columnas)
+- Preserve el trigger CBM que ya está en producción (`meter_id`, `trg_meter_reading_cbm`)
+
+**Dependencias**: N/A (bloqueante para cualquier feature que use `work_orders` con el nuevo schema)
+
+**Prioridad**: 🔴 ALTA (bloqueante para PM Engine)
+
+---
 
 **NOTA**: Cuando el entorno local cuente con Docker, se deben migrar las pruebas de integración de la Edge Function `epicor-webhook` para ejecutarse localmente mediante `supabase functions serve`, tal como se hizo con `oee-trigger`.
 
