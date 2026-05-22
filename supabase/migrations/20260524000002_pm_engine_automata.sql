@@ -41,7 +41,9 @@ DECLARE
 BEGIN
   FOR r IN
     WITH RECURSIVE due_chain AS (
-      -- Base: todos los schedules vencidos (por día calendario)
+      -- BASE: schedules vencidos cuyo padre NO está vencido (o son raíz)
+      -- Si el padre está vencido, el hijo entra solo vía la recursión
+      -- con suppressed=TRUE, garantizando supresión en N niveles.
       SELECT
         ps.id AS schedule_id,
         ps.parent_schedule_id,
@@ -53,6 +55,13 @@ BEGIN
       FROM pm_schedules ps
       WHERE ps.next_target_date IS NOT NULL
         AND ps.next_target_date::DATE <= CURRENT_DATE
+        AND (ps.parent_schedule_id IS NULL
+          OR NOT EXISTS (
+            SELECT 1 FROM pm_schedules p
+            WHERE p.id = ps.parent_schedule_id
+              AND p.next_target_date IS NOT NULL
+              AND p.next_target_date::DATE <= CURRENT_DATE
+          ))
 
       UNION ALL
 

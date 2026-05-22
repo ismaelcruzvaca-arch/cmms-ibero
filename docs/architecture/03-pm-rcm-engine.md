@@ -160,14 +160,27 @@ meters       1──N meter_readings
 |-----------|-------------|
 | `20260522000001` | Creación de 7 tablas + constraints + índices + RLS |
 | `20260522000002` | Fix de RLS: reemplaza políticas abiertas por RBAC granular |
+| `20260524000001` | CBM Alert Trigger: trigger en meter_readings + anti-spam + auto WO |
+| `20260524000002` | PM Engine Automata: generate_due_preventive_work_orders() con supresión jerárquica |
 
-### Fase 2 (Próxima)
+### Fase 2 Implementada — Automatización PM/CBM
 
-El motor de ejecución PM vivirá en una segunda fase con:
-- Función PL/pgSQL `generate_pm_work_orders()` evaluada por pg_cron
-- Trigger `after_insert_meter_reading` para detectar alertas en measure_points
+**Migration**: `20260524000001_cbm_alert_trigger.sql` — CBM Alert Trigger
+**Migration**: `20260524000002_pm_engine_automata.sql` — PM Engine Automata
+**Artefactos SDD**: `openspec/changes/pm-rcm-engine-phase-1/`
+
+| Componente | Descripción | Estado |
+|------------|-------------|--------|
+| `trg_meter_reading_cbm` | BEFORE INSERT trigger en meter_readings; evalúa 4 cuadrantes warning/critical, anti-spam por activo+medidor, genera OT para casos críticos | ✅ Implementado, testeado en producción |
+| `generate_due_preventive_work_orders()` | CTE recursiva con supresión jerárquica, herencia de materiales, recálculo fijo de reloj | 🟡 Implementado, PENDIENTE de verificación (bloqueado por schema drift) |
+
+### Fase 3 (Próxima)
+
+Pendiente para completar el motor de ejecución:
+- pg_cron scheduling de `generate_due_preventive_work_orders()` (o Supabase Cron Jobs)
 - Vista materializada `pm_due_calendar` para el planificador
 - Edge Function `pm-engine` como interfaz de administración
+- Soporte para `is_floating = true` (recálculo desde `last_completion_date` en vez de fecha fija)
 
 ## Riesgos
 
