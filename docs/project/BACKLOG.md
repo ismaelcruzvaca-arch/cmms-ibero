@@ -48,22 +48,26 @@
 
 ## [DEUDA TÉCNICA - INFRAESTRUCTURA]
 
-### CRÍTICO: Schema Drift — Producción vs Repositorio (ISO 14224)
+### ✅ RESUELTO: Schema Drift — Producción vs ISO 14224
 
-**Descripción**: La tabla `work_orders` en producción mantiene un esquema legacy (status VARCHAR, id TEXT, columnas RxDB como `_conflict`, `_deleted`) mientras que el repositorio está alineado al estándar ISO 14224 (lifecycle_phase ENUM, id UUID, timestamps operativos, taxonomía de fallas).
+**Resuelto en**: `2026-05-22` — Migración `20260522000003_work_orders_iso14224_production`
 
-**Riesgo**: El motor PM (`generate_due_preventive_work_orders()`) requiere `lifecycle_phase`, `job_plan_id` y `symptom_note` — columnas que no existen en producción. Desplegar el motor PM sin migrar el schema producirá errores en caliente.
+**Qué se hizo**:
+- Creados ENUMs `lifecycle_phase` y `block_reason` (idempotente)
+- Agregadas 25 columnas ISO 14224 como NULLable (ALTER TABLE ADD COLUMN IF NOT EXISTS)
+- Reemplazado FSM trigger: valida `lifecycle_phase` en vez de `status`
+- Creado trigger de sincronía bidireccional `lifecycle_phase ↔ status`
+- `wo_type_enum` extendido con valor `'PM'`
+- `job_plans`, `pm_schedules`, `meters`, `measure_points` creados en producción
+- `generate_due_preventive_work_orders()` desplegada (adaptada: pm_schedules.asset_id INTEGER)
 
-**Acción requerida**: Planificar una migración de datos controlada que:
-- Transforme `status` → `lifecycle_phase` con mapeo uno a uno
-- Migre `id` de `TEXT` → `UUID` conservando valores existentes
-- Remueva columnas legacy de RxDB (`_conflict`, `_deleted`, `updated_at` como BIGINT)
-- Agregue columnas ISO 14224 faltantes (15+ columnas)
-- Preserve el trigger CBM que ya está en producción (`meter_id`, `trg_meter_reading_cbm`)
+**Preservado**:
+- RxDB columns (`_deleted`, `_conflict`, `updated_at` BIGINT) — **NO se tocaron**
+- `work_orders.id` como TEXT — **NO se cambió a UUID** (evita cascada de FKs)
+- `status` VARCHAR — **NO se dropeó**, mantenida por trigger de sincronía
+- Todos los datos históricos (3 OTs) migrados con legacy_id y mapeo de timestamps
 
-**Dependencias**: N/A (bloqueante para cualquier feature que use `work_orders` con el nuevo schema)
-
-**Prioridad**: 🔴 ALTA (bloqueante para PM Engine)
+**Verificación**: 6/6 tests de sincronía pasan en producción ✅
 
 ---
 

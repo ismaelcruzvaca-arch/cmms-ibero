@@ -6,8 +6,11 @@
 -- pm_schedules. Incluye supresión jerárquica (SAP/Maximo),
 -- herencia de materiales, y recálculo de reloj fijo.
 --
--- NO APLICAR hasta que el Schema Drift de work_orders
--- esté resuelto (ver BACKLOG.md — DEUDA TÉCNICA).
+-- NOTA: En producción, pm_schedules.asset_id es INTEGER
+-- (assets.id es INTEGER), y work_orders.asset_id es TEXT.
+-- Por eso el JOIN usa a.id = dc.asset_id (INTEGER) y el
+-- INSERT castea r.asset_id::text para work_orders.asset_id.
+-- Ver migración 20260522000003 para el schema evolution.
 -- ============================================================
 
 -- -----------------------------------------------------------
@@ -91,7 +94,7 @@ BEGIN
         COALESCE(jp.description, jp.code) AS jp_desc,
         jp.estimated_hours
       FROM due_chain dc
-      JOIN assets a ON a.id = dc.asset_id
+      JOIN assets a ON a.id = dc.asset_id  -- assets.id es INTEGER en prod
       JOIN job_plans jp ON jp.id = dc.job_plan_id
       WHERE NOT dc.suppressed
     )

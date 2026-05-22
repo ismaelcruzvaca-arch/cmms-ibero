@@ -16,6 +16,27 @@
 - [x] **1.5 Apply migration to Supabase production**
   Adapted for production schema (no lifecycle_phase, adapted column references)
 
+## Migration 3: Schema Evolution — work_orders ISO 14224 (Producción)
+
+- [x] **3.1 Create ENUMs lifecycle_phase + block_reason** (idempotente)
+- [x] **3.2 Add 'PM' to wo_type_enum** (requerido por PM Engine)
+- [x] **3.3 Add all ISO 14224 columns as NULLable** (25 columnas nuevas)
+  Includes: lifecycle_phase, block_reason, timestamps, failure taxonomy, symptom_note, etc.
+- [x] **3.4 Replace FSM trigger: status → lifecycle_phase**
+  Dropped `work_orders_fsm_validation` (validaba status), creado `work_orders_fsm` (valida lifecycle_phase con NULL→any permitido para migración)
+- [x] **3.5 Create sync trigger `trg_sync_legacy_status`** (bidireccional lifecycle_phase ↔ status)
+  Forward: lifecycle_phase cambia → status sincroniza
+  Backward: status cambia → lifecycle_phase sincroniza (siempre que sea transición FSM válida)
+  Anti-loop: IS DISTINCT FROM evita loops
+  Prioridad: si ambos seteados, lifecycle_phase gana
+- [x] **3.6 Data migration (3 records históricos)**
+  status→lifecycle_phase mapping, description→symptom_note, legacy_id preservation, timestamp mapping
+- [x] **3.7 Create test: `schema_migration_work_orders_test.sql`** (7 tests)
+  Forward/Backward INSERT/UPDATE, Anti-Loop, Prioridad, FSM rejection
+- [x] **3.8 Apply preventive core schema to production** (job_plans, pm_schedules, meters, measure_points)
+  Adaptado: pm_schedules.asset_id INTEGER (assets.id es INTEGER en prod), job_plans con RLS
+- [x] **3.9 Apply PM Engine function to production** (producción-adapted: asset_id::text cast, INTEGER join)
+
 ## Migration 2: PM Engine Automata
 
 - [x] **2.1 Add `job_plan_id` column to `work_orders`**
@@ -57,7 +78,11 @@
 
 - [x] **4.1 CBM trigger tests on production**
   4 pgTAP tests executed: Normal, Warning, Critical, Anti-Spam — ✅ ALL GREEN
-- [x] **4.2 PM Engine test file created**
+- [x] **4.2 Schema migration tests on production**
+  6/6 manual tests on production: ✅ ALL GREEN
+  Forward INSERT, Backward INSERT, Forward UPDATE, Backward UPDATE, Anti-Loop, Prioridad
+  FSM rejection test confirmed (PASS — error esperado para transición inválida)
+- [x] **4.3 PM Engine test file created**
   `supabase/tests/database/pm_engine_test.sql` — 7 tests, 14 assertions (pgTAP)
-- [ ] **4.3 PM Engine functional tests execution**
-  Pending Supabase branch creation (blocked by schema drift; dry-run code review done)
+- [ ] **4.4 PM Engine functional tests execution**
+  Pending pg_cron scheduler setup + seed data in production (schema drift RESUELTO)
