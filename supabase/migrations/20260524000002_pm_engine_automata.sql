@@ -35,7 +35,7 @@ COMMENT ON COLUMN work_orders.job_plan_id IS 'Plan de trabajo (job_plan) que ori
 -- -----------------------------------------------------------
 CREATE OR REPLACE FUNCTION generate_due_preventive_work_orders()
 RETURNS INT
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+LANGUAGE plpgsql SECURITY DEFINER
 AS $$
 DECLARE
   v_created INT := 0;
@@ -102,11 +102,12 @@ BEGIN
     ORDER BY e.time_frequency_days DESC NULLS LAST
   LOOP
     -- a. GENERAR WORK ORDER
+    -- NOTA: work_orders.id es TEXT NOT NULL sin default → usar gen_random_uuid()
     INSERT INTO work_orders (
-      asset_id, equipment_id, wo_type, lifecycle_phase,
+      id, asset_id, equipment_id, wo_type, lifecycle_phase,
       job_plan_id, reported_at, planned_hours, symptom_note
     ) VALUES (
-      r.asset_id, r.equipment_id, 'PM', 'WAPPR',
+      gen_random_uuid()::text, r.asset_id::text, r.equipment_id, 'PM', 'WAPPR',
       r.job_plan_id, NOW(), r.estimated_hours,
       format(
         '[PM] %s — %s (Auto-generada cada %s días)',
