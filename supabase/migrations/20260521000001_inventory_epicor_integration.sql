@@ -66,7 +66,7 @@ COMMENT ON COLUMN public.spare_parts.track_serial IS 'Habilitar trazabilidad por
 
 -- 3b. BOM: qué partes usa cada activo (relación N:N)
 CREATE TABLE public.asset_spare_parts (
-  asset_id INTEGER NOT NULL REFERENCES public.assets(id) ON DELETE CASCADE,
+  asset_id TEXT NOT NULL REFERENCES public.assets(id) ON DELETE CASCADE,
   part_num TEXT NOT NULL REFERENCES public.spare_parts(part_num) ON DELETE CASCADE,
   PRIMARY KEY (asset_id, part_num)
 );
@@ -82,7 +82,7 @@ CREATE INDEX idx_asset_spare_parts_part ON public.asset_spare_parts(part_num);
 
 CREATE TABLE public.material_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  work_order_id TEXT NOT NULL REFERENCES public.work_orders(id) ON DELETE CASCADE,
+  work_order_id UUID NOT NULL REFERENCES public.work_orders(id) ON DELETE CASCADE,
   part_num TEXT REFERENCES public.spare_parts(part_num) ON DELETE SET NULL,
   line_desc TEXT NOT NULL,
   is_non_stock BOOLEAN NOT NULL DEFAULT false,
@@ -118,7 +118,7 @@ CREATE TABLE public.inventory_transactions (
   lot_num TEXT,
   serial_num TEXT,
   reason_code TEXT,
-  work_order_id TEXT REFERENCES public.work_orders(id) ON DELETE SET NULL,
+  work_order_id UUID REFERENCES public.work_orders(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -139,7 +139,7 @@ CREATE INDEX idx_invtx_created ON public.inventory_transactions(created_at DESC)
 -- 6. Perfil de Usuario
 -- ────────────────────────────────────────────
 
-CREATE TABLE public.user_profiles (
+CREATE TABLE IF NOT EXISTS public.user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   full_name TEXT,
   role TEXT NOT NULL DEFAULT 'mechanic' CHECK (role IN ('mechanic', 'supervisor', 'planner', 'admin')),
@@ -147,6 +147,24 @@ CREATE TABLE public.user_profiles (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Si la tabla ya existía de Migration 1, agregamos las columnas nuevas
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT FROM information_schema.columns
+    WHERE table_name = 'user_profiles' AND column_name = 'full_name'
+  ) THEN
+    ALTER TABLE public.user_profiles ADD COLUMN full_name TEXT;
+  END IF;
+  IF NOT EXISTS (
+    SELECT FROM information_schema.columns
+    WHERE table_name = 'user_profiles' AND column_name = 'erp_employee_num'
+  ) THEN
+    ALTER TABLE public.user_profiles ADD COLUMN erp_employee_num TEXT UNIQUE;
+  END IF;
+END;
+$$;
 
 COMMENT ON TABLE public.user_profiles IS 'Perfiles extendidos de usuario con mapeo a Epicor';
 COMMENT ON COLUMN public.user_profiles.erp_employee_num IS 'EmployeeNum en Epicor ERP (único por empleado)';

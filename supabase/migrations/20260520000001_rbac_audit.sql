@@ -100,14 +100,25 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- -----------------------------------------------------------
--- 7. Attach audit trigger a work_orders
---    (SerÃ¡ re-creado en Migration 2 tras el DROP CASCADE)
+-- 7. Attach audit trigger a work_orders (si ya existe)
+--    En un bootstrap limpio, work_orders aÃºn no existe
+--    (se crea en Migration 2). Si no existe, lo salteamos.
+--    Migration 2 re-crea este trigger.
 -- -----------------------------------------------------------
-DROP TRIGGER IF EXISTS work_orders_audit ON work_orders;
-CREATE TRIGGER work_orders_audit
-  AFTER INSERT OR UPDATE OR DELETE ON work_orders
-  FOR EACH ROW
-  EXECUTE FUNCTION audit_trigger_func();
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT FROM pg_tables
+    WHERE tablename = 'work_orders' AND schemaname = 'public'
+  ) THEN
+    DROP TRIGGER IF EXISTS work_orders_audit ON work_orders;
+    CREATE TRIGGER work_orders_audit
+      AFTER INSERT OR UPDATE OR DELETE ON work_orders
+      FOR EACH ROW
+      EXECUTE FUNCTION audit_trigger_func();
+  END IF;
+END;
+$$;
 
 -- -----------------------------------------------------------
 -- 8. Helper function: get_user_role()

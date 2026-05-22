@@ -18,7 +18,7 @@ DROP TABLE IF EXISTS work_orders CASCADE;
 CREATE TABLE work_orders (
   -- IdentificaciÃ³n
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  asset_id UUID REFERENCES assets(id),
+  asset_id TEXT REFERENCES assets(id),
   equipment_id VARCHAR NOT NULL,
   wo_type TEXT NOT NULL DEFAULT 'corrective',
 

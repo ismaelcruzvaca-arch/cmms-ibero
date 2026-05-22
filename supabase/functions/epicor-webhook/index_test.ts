@@ -13,6 +13,19 @@ import {
 } from "./index.ts";
 
 // =============================================================================
+// HELPERS
+// =============================================================================
+
+/** Save original env var value, delete it for test, return restore function. */
+function withoutSupabaseUrl(): () => void {
+  const saved = Deno.env.get("SUPABASE_URL");
+  Deno.env.delete("SUPABASE_URL");
+  return () => {
+    if (saved) Deno.env.set("SUPABASE_URL", saved);
+  };
+}
+
+// =============================================================================
 // UNIT TESTS: Auth Validation
 // =============================================================================
 
@@ -225,7 +238,7 @@ Deno.test("handleRequest: returns 400 with invalid payload", async () => {
 // =============================================================================
 
 Deno.test("lookupMaterialRequest: returns server error without env vars", async () => {
-  Deno.env.delete("SUPABASE_URL");
+  const restore = withoutSupabaseUrl();
 
   const result = await lookupMaterialRequest(1001);
   assertEquals(result.ok, false);
@@ -233,11 +246,11 @@ Deno.test("lookupMaterialRequest: returns server error without env vars", async 
     assertEquals(result.response.status, 500);
   }
 
-  Deno.env.set("SUPABASE_URL", "http://localhost");
+  restore();
 });
 
 Deno.test("insertReceiptTransaction: returns server error without env vars", async () => {
-  Deno.env.delete("SUPABASE_URL");
+  const restore = withoutSupabaseUrl();
 
   const result = await insertReceiptTransaction(
     { id: "test-id", work_order_id: "WO-001", part_num: "BOLT-M10-SS" },
@@ -248,11 +261,11 @@ Deno.test("insertReceiptTransaction: returns server error without env vars", asy
     assertEquals(result.response.status, 500);
   }
 
-  Deno.env.set("SUPABASE_URL", "http://localhost");
+  restore();
 });
 
 Deno.test("clearWorkOrderBlock: returns server error without env vars", async () => {
-  Deno.env.delete("SUPABASE_URL");
+  const restore = withoutSupabaseUrl();
 
   const result = await clearWorkOrderBlock("WO-001");
   assertEquals(result.ok, false);
@@ -260,74 +273,133 @@ Deno.test("clearWorkOrderBlock: returns server error without env vars", async ()
     assertEquals(result.response.status, 500);
   }
 
-  Deno.env.set("SUPABASE_URL", "http://localhost");
+  restore();
 });
 
 // =============================================================================
 // INTEGRATION TEST: Full DB round-trip (requires Supabase credentials)
 // =============================================================================
-// Skipped by default because it requires live Supabase credentials.
-// To enable: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, and ensure
-// the material_requests table contains a row with req_num = 9999.
+// Seeds test data dynamically, runs the webhook, then cleans up.
+// Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY pointing to local Supabase.
 
 Deno.test({
-  name: "handleRequest: full flow with DB (requires env vars)",
+  name: "handleRequest: full flow with DB (local Supabase)",
   ignore: !Deno.env.get("SUPABASE_URL") || !Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+  sanitizeResources: false,
+  sanitizeOps: false,
   fn: async () => {
-    Deno.env.set("EPICOR_WEBHOOK_SECRET", "integration-test-secret");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    const request = new Request("http://localhost", {
-      method: "POST",
-      headers: { Authorization: "Bearer integration-test-secret" },
-      body: JSON.stringify({
-        ReqNum: 9999,
-        PartNum: "TEST-PART-001",
-        ReceivedQty: 10,
-        PONum: "TEST-PO-001",
-      }),
-    });
+    // ── Pre-clean: remove any leftover test data from previous runs ─
+    await supabase.from("material_requests").delete().eq("req_num", 9999);
+    await supabase.from("inventory_transactions").delete().eq("reason_code", "PO: TEST-PO-001");
+    await supabase.from("work_orders").delete().eq("equipment_id", "TEST-EQ-001");
+    await supabase.from("spare_parts").delete().eq("part_num", "TEST-PART-001");
 
-    const response = await handleRequest(request);
-    const body = await response.json();
+    // ── Seed: spare_part ──────────────────────────────────────────
+    const { error: spErr } = await supabase
+      .from("spare_parts")
+      .upsert({ part_num: "TEST-PART-001", description: "Test part for integration", uom: "EA" })
+      .select();
+    if (spErr) throw new Error(`Failed to seed spare_parts: ${spErr.message}`);
 
-    // With valid credentials, expect 200, 404 (req not found), or 500
-    if (response.status === 200) {
+    // ── Seed: work_order with MATERIAL block ───────────────────────
+    const woId = crypto.randomUUID();
+    const { error: woErr } = await supabase
+      .from("work_orders")
+      .insert({
+        id: woId,
+        equipment_id: "TEST-EQ-001",
+        wo_type: "corrective",
+        lifecycle_phase: "WAPPR",
+        block_reason: "MATERIAL",
+      })
+      .select();
+    if (woErr) throw new Error(`Failed to seed work_orders: ${woErr.message}`);
+
+    // ── Seed: material_request with req_num = 9999 ────────────────
+    const { data: mrData, error: mrErr } = await supabase
+      .from("material_requests")
+      .insert({
+        work_order_id: woId,
+        part_num: "TEST-PART-001",
+        line_desc: "Integration test material request",
+        requested_qty: 1,
+        req_num: 9999,
+        is_non_stock: false,
+      })
+      .select("id, work_order_id, part_num")
+      .single();
+    if (mrErr) throw new Error(`Failed to seed material_requests: ${mrErr.message}`);
+    assertEquals(mrData.part_num, "TEST-PART-001", "Seeded material_request.part_num should persist");
+
+    // ── Cleanup function (runs regardless of test outcome) ────────
+    async function cleanup() {
+      await supabase.from("material_requests").delete().eq("req_num", 9999);
+      await supabase.from("inventory_transactions").delete().eq("reason_code", "PO: TEST-PO-001");
+      await supabase.from("work_orders").delete().eq("id", woId);
+      await supabase.from("spare_parts").delete().eq("part_num", "TEST-PART-001");
+    }
+
+    try {
+      // ── Execute webhook ─────────────────────────────────────────
+      Deno.env.set("EPICOR_WEBHOOK_SECRET", "integration-test-secret");
+
+      const request = new Request("http://localhost", {
+        method: "POST",
+        headers: { Authorization: "Bearer integration-test-secret" },
+        body: JSON.stringify({
+          ReqNum: 9999,
+          PartNum: "TEST-PART-001",
+          ReceivedQty: 10,
+          PONum: "TEST-PO-001",
+        }),
+      });
+
+      const response = await handleRequest(request);
+      const body = await response.json();
+
+      // ── Assert 200 OK ───────────────────────────────────────────
+      assertEquals(
+        response.status,
+        200,
+        `Expected 200, got ${response.status}: ${JSON.stringify(body)}`,
+      );
       assertEquals(body.success, true);
       assertEquals(body.req_num, 9999);
       assertEquals(body.part_num, "TEST-PART-001");
       assertEquals(body.qty, 10);
-      assertExists(body.work_order_id);
+      assertEquals(body.work_order_id, woId);
 
-      // Verify inventory_transaction was created
-      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-      const supabase = createClient(supabaseUrl, serviceRoleKey);
-
+      // ── Verify inventory_transaction was created ────────────────
       const { data: tx, error: txError } = await supabase
         .from("inventory_transactions")
         .select("*")
-        .eq("reason_code", "TEST-PO-001")
+        .eq("reason_code", "PO: TEST-PO-001")
         .limit(1)
         .maybeSingle();
 
-      assertEquals(txError, null);
-      assertExists(tx);
+      assertEquals(txError, null, `inventory_transactions query error: ${txError?.message}`);
+      assertExists(tx, "Expected inventory_transaction to exist");
       assertEquals(tx.transaction_type, "RECEIPT");
       assertEquals(tx.qty, 10);
+      assertEquals(tx.part_num, "TEST-PART-001");
+      assertEquals(tx.work_order_id, woId);
 
-      // Verify work order block was cleared
+      // ── Verify work order block was cleared ─────────────────────
       const { data: wo, error: woError } = await supabase
         .from("work_orders")
         .select("block_reason")
-        .eq("id", body.work_order_id)
+        .eq("id", woId)
         .single();
 
-      assertEquals(woError, null);
+      assertEquals(woError, null, `work_orders query error: ${woError?.message}`);
+      assertExists(wo);
       assertEquals(wo.block_reason, "NONE");
-    } else if (response.status === 404) {
-      assertEquals(body.error, "Material request not found for ReqNum 9999");
-    } else {
-      throw new Error(`Unexpected status: ${response.status} - ${JSON.stringify(body)}`);
+    } finally {
+      await cleanup();
     }
   },
 });
