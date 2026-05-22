@@ -213,6 +213,22 @@ const workOrdersMigrationV3 = {
   }
 };
 
+const materialRequestSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 100 },
+    work_order_id: { type: 'string', maxLength: 50 },
+    part_num: { type: 'string' },
+    line_desc: { type: 'string' },
+    is_non_stock: { type: 'boolean' },
+    requested_qty: { type: 'number', minimum: 0 },
+    created_at: { type: 'string' }
+  },
+  required: ['id', 'work_order_id', 'line_desc', 'requested_qty']
+};
+
 const workOrdersMigrationV4 = {
   4: async (oldDoc) => {
     const oldBlockReasonMap = {
@@ -275,7 +291,8 @@ async function _createDatabase() {
         migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4 }
       },
       assets: { schema: assetSchema },
-      asset_hierarchy: { schema: assetHierarchySchema }
+      asset_hierarchy: { schema: assetHierarchySchema },
+      material_requests: { schema: materialRequestSchema }
     });
   } catch (err) {
     const errorStr = String(err);
@@ -293,7 +310,8 @@ async function _createDatabase() {
           migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4 }
         },
         assets: { schema: assetSchema },
-        asset_hierarchy: { schema: assetHierarchySchema }
+        asset_hierarchy: { schema: assetHierarchySchema },
+        material_requests: { schema: materialRequestSchema }
       });
       newDb.work_orders.preSave((plainData, doc) => {
         const oldPhase = doc.lifecycle_phase;
@@ -614,6 +632,22 @@ export async function startAllReplications(db) {
     push: { handler: hierarchyPush }
   });
 
+  // Material Requests
+  const mrPull = createPullHandler('material_requests', 'created_at');
+  const mrPush = createPushHandler('material_requests', [
+    'id', 'work_order_id', 'part_num', 'line_desc', 'is_non_stock',
+    'requested_qty', 'created_at'
+  ]);
+
+  replicationStates.material_requests = replicateRxCollection({
+    collection: db.material_requests,
+    replicationIdentifier: 'cmms-mr-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: mrPull },
+    push: { handler: mrPush }
+  });
+
   // Suscripciones a estados
   Object.entries(replicationStates).forEach(([key, state]) => {
     state.active$.subscribe(isActive => {
@@ -836,4 +870,4 @@ export function useAssets() {
   return { assets, hierarchy, assetTree, loading, error, syncStatus, refreshAssets };
 }
 
-export { workOrderSchema, assetSchema, assetHierarchySchema };
+export { workOrderSchema, assetSchema, assetHierarchySchema, materialRequestSchema };
