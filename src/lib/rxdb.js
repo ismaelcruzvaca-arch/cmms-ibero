@@ -23,48 +23,83 @@ const BATCH_SIZE = 50;
 // SCHEMAS DE RXDB (JSON puro, sin funciones)
 // ============================================
 const workOrderSchema = {
-  version: 3,
+  version: 4,
   primaryKey: 'id',
   type: 'object',
   properties: {
+    // ── Identidad ──
     id: { type: 'string', maxLength: 50 },
+    legacy_id: { type: 'string' },
     equipment_id: { type: 'string', maxLength: 50 },
     description: { type: 'string' },
-    location: { type: 'string', maxLength: 100 },
+    asset_id: { type: 'string', maxLength: 100 },
+
+    // ── ISO 14224: Ciclo de Vida ──
+    wo_type: { type: 'string', enum: ['preventive', 'corrective', 'predictive', 'emergency', 'inspection', 'CBM', 'PM'] },
+    lifecycle_phase: { type: 'string', enum: ['WAPPR', 'APPROVED', 'INPRG', 'COMP', 'CLOSED', 'CANCELLED', 'REJECTED'] },
+    block_reason: { type: 'string', enum: ['NONE', 'PARTS', 'TOOLS', 'CREW', 'PERMIT', 'SHUTDOWN', 'WEATHER', 'OTHER'] },
+    priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
     criticality: { type: 'string', enum: ['A', 'B', 'C'] },
-    lifecycle_phase: { type: 'string', enum: ['WAPPR', 'APPROVED', 'INPRG', 'COMP', 'CLOSED'] },
-    block_reason: { type: 'string', enum: ['NONE', 'MATERIAL', 'PLANT_CONDITION', 'SCHEDULE'] },
+    percentage_complete: { type: 'number', minimum: 0, maximum: 100 },
+
+    // ── ISO 14224: Timestamps Operativos ──
+    reported_at: { type: 'string' },
+    approved_at: { type: 'string' },
+    planned_start_at: { type: 'string' },
+    actual_start_at: { type: 'string' },
+    completed_at: { type: 'string' },
+    closed_at: { type: 'string' },
+    machine_down_at: { type: 'string' },
+    machine_up_at: { type: 'string' },
+    scheduled_date: { type: 'string' },
+    completed_date: { type: 'string' },
+    approval_date: { type: 'string' },
+    start_date: { type: 'string' },
+    end_date: { type: 'string' },
+    created_at: { type: 'string' },
+
+    // ── ISO 14224: Taxonomía de Fallas ──
     failure_class: { type: 'string' },
     problem_code: { type: 'string' },
     cause_code: { type: 'string' },
     remedy_code: { type: 'string' },
+    asset_class: { type: 'string' },
+    part_in_process: { type: 'string' },
     symptom_note: { type: 'string' },
     cause_note: { type: 'string' },
     action_note: { type: 'string' },
-    priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+    resolution_note: { type: 'string' },
+
+    // ── Asignación y Responsables ──
     assigned_to: { type: 'string' },
-    scheduled_date: { type: 'string' },
-    completed_date: { type: 'string' },
-    created_at: { type: 'string' },
-    updated_at: { type: 'number' },
-    asset_id: { type: 'string', maxLength: 100 },
-    wo_type: { type: 'string', enum: ['preventive', 'corrective', 'predictive', 'emergency', 'inspection'] },
+    requested_by: { type: 'string' },
+    reported_by: { type: 'string' },
+    approved_by: { type: 'string' },
+    created_by: { type: 'string' },          // UUID como string
+
+    // ── Referencias a Entidades ──
+    job_plan_id: { type: 'string' },         // UUID del job_plan que originó la OT
+    meter_id: { type: 'string' },            // UUID del medidor CBM
+
+    // ── Planificación ──
     planned_hours: { type: 'number', minimum: 0 },
     actual_hours: { type: 'number', minimum: 0 },
     cost_estimate: { type: 'number', minimum: 0 },
     actual_cost: { type: 'number', minimum: 0 },
-    requested_by: { type: 'string' },
-    approved_by: { type: 'string' },
-    approval_date: { type: 'string' },
-    start_date: { type: 'string' },
-    end_date: { type: 'string' },
+    downtime_hours: { type: 'number', minimum: 0 },
+    work_center: { type: 'string' },
+    planner_group: { type: 'string' },
+    maintenance_reference: { type: 'string' },
+    revision: { type: 'number' },
+
+    // ── Campos de Control ──
+    location: { type: 'string', maxLength: 100 },
     hold_reason: { type: 'string' },
     close_reason: { type: 'string' },
     cancel_reason: { type: 'string' },
-    work_center: { type: 'string' },
-    planner_group: { type: 'string' },
-    downtime_hours: { type: 'number', minimum: 0 },
-    percentage_complete: { type: 'number', minimum: 0, maximum: 100 },
+    updated_at: { type: 'number' },
+
+    // ── RxDB / Replicación ──
     _conflict: { type: 'boolean' },
     _deleted: { type: 'boolean' }
   },
@@ -178,6 +213,46 @@ const workOrdersMigrationV3 = {
   }
 };
 
+const workOrdersMigrationV4 = {
+  4: async (oldDoc) => {
+    const oldBlockReasonMap = {
+      'MATERIAL': 'PARTS',
+      'PLANT_CONDITION': 'SHUTDOWN',
+      'SCHEDULE': 'CREW'
+    };
+    return {
+      ...oldDoc,
+      // Fix block_reason enum values (changed in ISO 14224 production migration)
+      block_reason: oldBlockReasonMap[oldDoc.block_reason] || oldDoc.block_reason || 'NONE',
+      // New ISO 14224 timestamp fields (default empty string)
+      reported_at: oldDoc.reported_at || oldDoc.created_at || '',
+      approved_at: oldDoc.approved_at || '',
+      planned_start_at: oldDoc.planned_start_at || oldDoc.start_date || '',
+      actual_start_at: oldDoc.actual_start_at || '',
+      completed_at: oldDoc.completed_at || oldDoc.completed_date || '',
+      closed_at: oldDoc.closed_at || '',
+      machine_down_at: oldDoc.machine_down_at || '',
+      machine_up_at: oldDoc.machine_up_at || '',
+      // New taxonomía fields
+      asset_class: oldDoc.asset_class || '',
+      part_in_process: oldDoc.part_in_process || '',
+      resolution_note: oldDoc.resolution_note || '',
+      reported_by: oldDoc.reported_by || oldDoc.requested_by || '',
+      created_by: oldDoc.created_by || '',
+      maintenance_reference: oldDoc.maintenance_reference || '',
+      revision: oldDoc.revision || 0,
+      legacy_id: oldDoc.legacy_id || oldDoc.id || '',
+      // Referencias
+      job_plan_id: oldDoc.job_plan_id || '',
+      meter_id: oldDoc.meter_id || '',
+      // wo_type: ensure PM/CBM values pass validation
+      wo_type: (['preventive', 'corrective', 'predictive', 'emergency', 'inspection', 'CBM', 'PM'].includes(oldDoc.wo_type))
+        ? oldDoc.wo_type
+        : (oldDoc.wo_type || 'corrective'),
+    };
+  }
+};
+
 // ============================================
 // SINGLETON PATTERN
 // Evita Error DB8 en React StrictMode
@@ -197,7 +272,7 @@ async function _createDatabase() {
     await db.addCollections({
       work_orders: {
         schema: workOrderSchema,
-        migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3 }
+        migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4 }
       },
       assets: { schema: assetSchema },
       asset_hierarchy: { schema: assetHierarchySchema }
@@ -215,7 +290,7 @@ async function _createDatabase() {
       await newDb.addCollections({
         work_orders: {
           schema: workOrderSchema,
-          migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3 }
+          migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4 }
         },
         assets: { schema: assetSchema },
         asset_hierarchy: { schema: assetHierarchySchema }
@@ -403,6 +478,12 @@ const WORK_ORDER_PUSH_FIELDS = [
   'requested_by', 'approved_by', 'approval_date', 'start_date',
   'end_date', 'hold_reason', 'close_reason', 'cancel_reason',
   'work_center', 'planner_group', 'downtime_hours', 'percentage_complete',
+  'reported_at', 'approved_at', 'planned_start_at', 'actual_start_at',
+  'completed_at', 'closed_at', 'machine_down_at', 'machine_up_at',
+  'failure_class', 'problem_code', 'cause_code', 'remedy_code',
+  'asset_class', 'part_in_process', 'symptom_note', 'cause_note',
+  'action_note', 'resolution_note', 'reported_by', 'created_by',
+  'maintenance_reference', 'revision', 'legacy_id', 'job_plan_id', 'meter_id',
   '_conflict'
 ];
 
