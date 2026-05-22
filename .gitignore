@@ -34,6 +34,9 @@ test-results/
 # Deno lock files (root level — function-level is tracked)
 deno.lock
 
+# OpenCode AI internal cache
+.atl/
+
 # Supabase CLI temp files
 supabase/.temp/
 supabase/.branches/
