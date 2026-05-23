@@ -12,7 +12,7 @@
 
 BEGIN;
 
-SELECT plan(14);
+SELECT plan(12);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 0. Seed global: assets, job_plans, job_plan_materials (compartido entre tests)
@@ -40,6 +40,13 @@ FROM job_plans jp WHERE jp.code = 'PM-TEST-JP1'
 UNION ALL
 SELECT jp.id, 'PART-002', 1
 FROM job_plans jp WHERE jp.code = 'PM-TEST-JP1';
+
+-- Seed spare_parts para FK material_requests_part_num_fkey
+INSERT INTO spare_parts (part_num, description)
+VALUES
+  ('PART-001', 'Parte de prueba #1'),
+  ('PART-002', 'Parte de prueba #2')
+ON CONFLICT (part_num) DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Helper: obtener IDs de datos sembrados
@@ -69,7 +76,7 @@ SELECT is(
 SELECT results_eq(
   $$ SELECT wo_type, lifecycle_phase FROM work_orders
      WHERE asset_id = 'PM-TEST-001' AND wo_type = 'PM' $$,
-  $$ VALUES ('PM'::text, 'WAPPR'::text) $$,
+  $$ VALUES ('PM'::text, 'WAPPR'::lifecycle_phase) $$,
   'Test 1 — Schedule básico: wo_type = PM, lifecycle_phase = WAPPR'
 );
 
@@ -88,7 +95,8 @@ FROM v_test_ids;
 -- Crear schedule hijo (padre vencido → debe suprimirse)
 INSERT INTO pm_schedules (id, asset_id, job_plan_id, time_frequency_days, next_target_date, parent_schedule_id)
 SELECT '550e8400-e29b-41d4-a716-446655440002'::uuid, asset_1_id, jp_2_id, 30, CURRENT_DATE - INTERVAL '1 day',
-       '550e8400-e29b-41d4-a716-446655440001'::uuid;
+       '550e8400-e29b-41d4-a716-446655440001'::uuid
+FROM v_test_ids;
 
 SELECT is(
   generate_due_preventive_work_orders(),
@@ -117,7 +125,8 @@ FROM v_test_ids;
 -- Crear schedule hijo (vencido, padre no vencido → NO se suprime)
 INSERT INTO pm_schedules (id, asset_id, job_plan_id, time_frequency_days, next_target_date, parent_schedule_id)
 SELECT '550e8400-e29b-41d4-a716-446655440004'::uuid, asset_1_id, jp_2_id, 30, CURRENT_DATE - INTERVAL '1 day',
-       '550e8400-e29b-41d4-a716-446655440003'::uuid;
+       '550e8400-e29b-41d4-a716-446655440003'::uuid
+FROM v_test_ids;
 
 SELECT is(
   generate_due_preventive_work_orders(),
@@ -145,11 +154,13 @@ FROM v_test_ids;
 
 INSERT INTO pm_schedules (id, asset_id, job_plan_id, time_frequency_days, next_target_date, parent_schedule_id)
 SELECT '550e8400-e29b-41d4-a716-446655440011'::uuid, asset_1_id, jp_1_id, 90, CURRENT_DATE - INTERVAL '1 day',
-       '550e8400-e29b-41d4-a716-446655440010'::uuid;
+       '550e8400-e29b-41d4-a716-446655440010'::uuid
+FROM v_test_ids;
 
 INSERT INTO pm_schedules (id, asset_id, job_plan_id, time_frequency_days, next_target_date, parent_schedule_id)
 SELECT '550e8400-e29b-41d4-a716-446655440012'::uuid, asset_1_id, jp_2_id, 30, CURRENT_DATE - INTERVAL '1 day',
-       '550e8400-e29b-41d4-a716-446655440011'::uuid;
+       '550e8400-e29b-41d4-a716-446655440011'::uuid
+FROM v_test_ids;
 
 SELECT is(
   generate_due_preventive_work_orders(),
@@ -181,7 +192,7 @@ SELECT is(
   (SELECT COUNT(*) FROM material_requests mr
    JOIN work_orders wo ON wo.id = mr.work_order_id
    WHERE wo.asset_id = 'PM-TEST-001' AND wo.wo_type = 'PM'),
-  2,
+  2::bigint,
   'Test 5 — Herencia materiales: 2 material_requests creados desde job_plan'
 );
 
@@ -235,6 +246,7 @@ ROLLBACK TO SAVEPOINT test7;
 DROP VIEW IF EXISTS v_test_ids;
 
 DELETE FROM job_plan_materials WHERE job_plan_id IN (SELECT id FROM job_plans WHERE code LIKE 'PM-TEST-%');
+DELETE FROM spare_parts WHERE part_num IN ('PART-001', 'PART-002');
 DELETE FROM job_plans WHERE code LIKE 'PM-TEST-%';
 DELETE FROM assets WHERE id LIKE 'PM-TEST-%';
 DELETE FROM asset_types WHERE id = 'TEST_PM';

@@ -14,7 +14,7 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 BEGIN;
 
-SELECT plan(4);
+SELECT plan(9);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. Seed: activo, medidor, punto de medición
@@ -114,7 +114,7 @@ SELECT ok(
 );
 
 SELECT results_eq(
-  'SELECT wo_type, criticality FROM work_orders
+  'SELECT wo_type, criticality::text FROM work_orders
    WHERE asset_id = ''TEST-ASSET-001'' AND wo_type = ''CBM''',
   $$ VALUES ('CBM'::text, 'A'::text) $$,
   'Test 3 — Critical 95°C: wo_type = CBM, criticality = A'

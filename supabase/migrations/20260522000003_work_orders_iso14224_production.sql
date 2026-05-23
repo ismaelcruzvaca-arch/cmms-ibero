@@ -18,7 +18,14 @@ DO $$ BEGIN
     'WAPPR', 'APPROVED', 'INPRG', 'COMP', 'CLOSED',
     'CANCELLED', 'REJECTED'
   );
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object THEN
+  -- Agregar valores faltantes si el tipo ya existe
+  BEGIN
+    ALTER TYPE lifecycle_phase ADD VALUE IF NOT EXISTS 'CANCELLED';
+  EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN
+    ALTER TYPE lifecycle_phase ADD VALUE IF NOT EXISTS 'REJECTED';
+  EXCEPTION WHEN duplicate_object THEN NULL; END;
 END $$;
 
 DO $$ BEGIN
@@ -33,7 +40,12 @@ END $$;
 -- 2. Agregar 'PM' al wo_type_enum existente (idempotente)
 --    Necesario para que la migración del PM Engine no falle
 -- -----------------------------------------------------------
-ALTER TYPE wo_type_enum ADD VALUE IF NOT EXISTS 'PM';
+DO $$ BEGIN
+  ALTER TYPE wo_type_enum ADD VALUE IF NOT EXISTS 'PM';
+EXCEPTION WHEN undefined_object THEN
+  -- wo_type_enum no existe en este entorno (ej: local dev con TEXT)
+  NULL;
+END $$;
 
 -- -----------------------------------------------------------
 -- 3. Agregar columnas ISO 14224 faltantes (TODAS NULLable)
@@ -81,6 +93,10 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS legacy_id TEXT;
 
 -- job_plan_id (idempotente — la migración del PM Engine ya lo agrega)
 ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS job_plan_id UUID REFERENCES job_plans(id);
+
+-- Columna status para retrocompatibilidad con RxDB (sync bidireccional)
+ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending';
+COMMENT ON COLUMN work_orders.status IS 'Retrocompatibilidad RxDB — sincronizado desde lifecycle_phase via trigger';
 
 COMMENT ON COLUMN work_orders.lifecycle_phase IS 'ISO 14224 — Fase del ciclo de vida de la OT';
 COMMENT ON COLUMN work_orders.block_reason IS 'ISO 14224 — Motivo de bloqueo (si lifecycle_phase lo requiere)';
@@ -133,6 +149,8 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS work_orders_fsm ON work_orders;
+
 CREATE TRIGGER work_orders_fsm
   BEFORE UPDATE ON work_orders
   FOR EACH ROW
@@ -153,8 +171,18 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
-    -- Nueva OT: lifecycle_phase es fuente de verdad
-    IF NEW.lifecycle_phase IS NOT NULL AND NEW.status IS NULL THEN
+    -- Si status fue explícitamente seteado y lifecycle_phase es el default → status gana
+    IF NEW.status IS NOT NULL AND NEW.lifecycle_phase = 'WAPPR'::lifecycle_phase THEN
+      NEW.lifecycle_phase := CASE NEW.status
+        WHEN 'pending'      THEN 'WAPPR'
+        WHEN 'approved'     THEN 'APPROVED'
+        WHEN 'in_progress'  THEN 'INPRG'
+        WHEN 'completed'    THEN 'COMP'
+        WHEN 'cancelled'    THEN 'CANCELLED'
+        ELSE 'WAPPR'
+      END::lifecycle_phase;
+    -- Si lifecycle_phase fue explícitamente seteado (no default) → lifecycle_phase gana
+    ELSIF NEW.lifecycle_phase IS NOT NULL THEN
       NEW.status := CASE NEW.lifecycle_phase
         WHEN 'WAPPR'     THEN 'pending'
         WHEN 'APPROVED'  THEN 'approved'
@@ -165,16 +193,6 @@ BEGIN
         WHEN 'REJECTED'  THEN 'cancelled'
         ELSE 'pending'
       END;
-    -- Si solo setearon status (app legacy), mapear a lifecycle_phase
-    ELSIF NEW.status IS NOT NULL AND NEW.lifecycle_phase IS NULL THEN
-      NEW.lifecycle_phase := CASE NEW.status
-        WHEN 'pending'      THEN 'WAPPR'
-        WHEN 'approved'     THEN 'APPROVED'
-        WHEN 'in_progress'  THEN 'INPRG'
-        WHEN 'completed'    THEN 'COMP'
-        WHEN 'cancelled'    THEN 'CANCELLED'
-        ELSE 'WAPPR'
-      END::lifecycle_phase;
     END IF;
 
   ELSIF TG_OP = 'UPDATE' THEN
@@ -218,62 +236,68 @@ COMMENT ON TRIGGER trg_sync_legacy_status ON work_orders IS
   'Sincronía bidireccional lifecycle_phase ↔ status para retrocompatibilidad RxDB';
 
 -- -----------------------------------------------------------
--- 6. Migrar datos históricos (3 registros en producción)
+-- 6. Migrar datos históricos (solo en producción con columnas legacy)
 -- -----------------------------------------------------------
-BEGIN;
+DO $$ BEGIN
+  -- Solo ejecutar si existe la columna legacy 'status'
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'work_orders' AND column_name = 'status') THEN
 
--- Mapear status existentes → lifecycle_phase
+    BEGIN
+      UPDATE work_orders
+      SET lifecycle_phase = CASE status
+        WHEN 'pending'      THEN 'WAPPR'
+        WHEN 'approved'     THEN 'APPROVED'
+        WHEN 'in_progress'  THEN 'INPRG'
+        WHEN 'completed'    THEN 'COMP'
+        WHEN 'cancelled'    THEN 'CANCELLED'
+        ELSE 'WAPPR'
+      END::lifecycle_phase
+      WHERE lifecycle_phase IS NULL;
+    EXCEPTION WHEN undefined_column THEN NULL; END;
+
+    BEGIN
+      UPDATE work_orders
+      SET symptom_note = description
+      WHERE symptom_note IS NULL AND description IS NOT NULL;
+    EXCEPTION WHEN undefined_column THEN NULL; END;
+
+    BEGIN
+      UPDATE work_orders
+      SET planned_start_at = scheduled_date::TIMESTAMPTZ
+      WHERE planned_start_at IS NULL AND scheduled_date IS NOT NULL;
+    EXCEPTION WHEN undefined_column THEN NULL; END;
+
+    BEGIN
+      UPDATE work_orders
+      SET actual_start_at = start_date
+      WHERE actual_start_at IS NULL AND start_date IS NOT NULL;
+    EXCEPTION WHEN undefined_column THEN NULL; END;
+
+    BEGIN
+      UPDATE work_orders
+      SET completed_at = completed_date::TIMESTAMPTZ
+      WHERE completed_at IS NULL AND completed_date IS NOT NULL;
+    EXCEPTION WHEN undefined_column THEN NULL; END;
+
+    BEGIN
+      UPDATE work_orders
+      SET closed_at = end_date
+      WHERE closed_at IS NULL AND end_date IS NOT NULL;
+    EXCEPTION WHEN undefined_column THEN NULL; END;
+
+    BEGIN
+      UPDATE work_orders
+      SET approved_at = approval_date
+      WHERE approved_at IS NULL AND approval_date IS NOT NULL;
+    EXCEPTION WHEN undefined_column THEN NULL; END;
+  END IF;
+END $$;
+
+-- Preservar IDs legacy
 UPDATE work_orders
-SET lifecycle_phase = CASE status
-  WHEN 'pending'      THEN 'WAPPR'
-  WHEN 'approved'     THEN 'APPROVED'
-  WHEN 'in_progress'  THEN 'INPRG'
-  WHEN 'completed'    THEN 'COMP'
-  WHEN 'cancelled'    THEN 'CANCELLED'
-  ELSE 'WAPPR'
-END::lifecycle_phase
-WHERE lifecycle_phase IS NULL;
-
--- Copiar description → symptom_note donde corresponda
-UPDATE work_orders
-SET symptom_note = description
-WHERE symptom_note IS NULL AND description IS NOT NULL;
-
--- Mapear scheduled_date → planned_start_at
-UPDATE work_orders
-SET planned_start_at = scheduled_date::TIMESTAMPTZ
-WHERE planned_start_at IS NULL AND scheduled_date IS NOT NULL;
-
--- Mapear start_date → actual_start_at
-UPDATE work_orders
-SET actual_start_at = start_date
-WHERE actual_start_at IS NULL AND start_date IS NOT NULL;
-
--- Mapear completed_date → completed_at
-UPDATE work_orders
-SET completed_at = completed_date::TIMESTAMPTZ
-WHERE completed_at IS NULL AND completed_date IS NOT NULL;
-
--- Mapear end_date → closed_at
-UPDATE work_orders
-SET closed_at = end_date
-WHERE closed_at IS NULL AND end_date IS NOT NULL;
-
--- Mapear approval_date → approved_at
-UPDATE work_orders
-SET approved_at = approval_date
-WHERE approved_at IS NULL AND approval_date IS NOT NULL;
-
--- Preservar IDs legacy para el registro TEST-001
-UPDATE work_orders
-SET legacy_id = id
-WHERE id ~ '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$' IS NOT TRUE;
-
--- Nota: work_orders.id se queda como TEXT. No se cambia a UUID
--- para evitar cascada de FKs y mantener compatibilidad con RxDB.
--- Los valores existentes ya son UUID (excepto TEST-001 que tiene legacy_id).
-
-COMMIT;
+SET legacy_id = id::text
+WHERE legacy_id IS NULL;
 
 -- -----------------------------------------------------------
 -- 7. Verificación post-migración

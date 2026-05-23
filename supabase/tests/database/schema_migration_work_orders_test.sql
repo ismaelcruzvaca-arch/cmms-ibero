@@ -4,18 +4,18 @@
 --
 -- Valida que el trigger trg_sync_legacy_status funciona correctamente
 -- manteniendo lifecycle_phase ↔ status en sincronía bidireccional.
---
--- Ejecutar DESPUÉS de aplicar la migración schema-evolution-production
 -- =============================================================================
 
 BEGIN;
 
-SELECT plan(8);
+SELECT plan(9);
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 0. Setup: asset + job_plan mínimos para FKs (work_orders puede requerirlos)
---    Usamos asset_id TEXT que ya existe en producción
+-- 0. Setup: asset_type + asset + job_plan mínimos para FKs
 -- ─────────────────────────────────────────────────────────────────────────────
+INSERT INTO asset_types (id, name) VALUES ('TEST', 'Test Type')
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO assets (id, equipment_id, description, asset_type_id)
 VALUES ('MIG-TEST-ASSET', 'EQ-MIG-TEST', 'Asset de prueba migración', 'TEST')
 ON CONFLICT (id) DO NOTHING;
@@ -27,9 +27,13 @@ ON CONFLICT (id) DO NOTHING;
 SAVEPOINT test1;
 
 INSERT INTO work_orders (id, equipment_id, asset_id, lifecycle_phase)
-VALUES ('T1-FWD-INSERT'::text, 'EQ-TEST-1', 'MIG-TEST-ASSET', 'WAPPR');
+VALUES ('T1-FWD-INSERT', 'EQ-TEST-1', 'MIG-TEST-ASSET', 'WAPPR');
 
-SELECT is(status, 'pending', 'Test 1 — Forward INSERT: lifecycle_phase=WAPPR → status=pending');
+SELECT is(
+  (SELECT status FROM work_orders WHERE id = 'T1-FWD-INSERT'),
+  'pending',
+  'Test 1 — Forward INSERT: lifecycle_phase=WAPPR → status=pending'
+);
 
 ROLLBACK TO SAVEPOINT test1;
 
@@ -40,10 +44,13 @@ ROLLBACK TO SAVEPOINT test1;
 SAVEPOINT test2;
 
 INSERT INTO work_orders (id, equipment_id, asset_id, status)
-VALUES ('T2-BWD-INSERT'::text, 'EQ-TEST-2', 'MIG-TEST-ASSET', 'completed');
+VALUES ('T2-BWD-INSERT', 'EQ-TEST-2', 'MIG-TEST-ASSET', 'completed');
 
-SELECT is(lifecycle_phase, 'COMP'::lifecycle_phase,
-  'Test 2 — Backward INSERT: status=completed → lifecycle_phase=COMP');
+SELECT is(
+  (SELECT lifecycle_phase FROM work_orders WHERE id = 'T2-BWD-INSERT'),
+  'COMP'::lifecycle_phase,
+  'Test 2 — Backward INSERT: status=completed → lifecycle_phase=COMP'
+);
 
 ROLLBACK TO SAVEPOINT test2;
 
@@ -54,30 +61,36 @@ ROLLBACK TO SAVEPOINT test2;
 SAVEPOINT test3;
 
 INSERT INTO work_orders (id, equipment_id, asset_id, lifecycle_phase)
-VALUES ('T3-FWD-UPDATE'::text, 'EQ-TEST-3', 'MIG-TEST-ASSET', 'WAPPR');
+VALUES ('T3-FWD-UPDATE', 'EQ-TEST-3', 'MIG-TEST-ASSET', 'WAPPR');
 
-UPDATE work_orders SET lifecycle_phase = 'COMP'
+UPDATE work_orders SET lifecycle_phase = 'APPROVED'
 WHERE id = 'T3-FWD-UPDATE';
 
-SELECT is(status, 'completed',
-  'Test 3 — Forward UPDATE: lifecycle_phase WAPPR→COMP → status=completed');
+SELECT is(
+  (SELECT status FROM work_orders WHERE id = 'T3-FWD-UPDATE'),
+  'approved',
+  'Test 3 — Forward UPDATE: lifecycle_phase WAPPR→APPROVED → status=approved'
+);
 
 ROLLBACK TO SAVEPOINT test3;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4. Test 4: Backward UPDATE — status cambia → lifecycle_phase sincroniza
---    Simula técnico en piso marcando OT como in_progress desde la tablet
+--    Simula planificador actualizando status desde la app web
 -- ─────────────────────────────────────────────────────────────────────────────
 SAVEPOINT test4;
 
 INSERT INTO work_orders (id, equipment_id, asset_id, lifecycle_phase)
-VALUES ('T4-BWD-UPDATE'::text, 'EQ-TEST-4', 'MIG-TEST-ASSET', 'WAPPR');
+VALUES ('T4-BWD-UPDATE', 'EQ-TEST-4', 'MIG-TEST-ASSET', 'WAPPR');
 
-UPDATE work_orders SET status = 'in_progress'
+UPDATE work_orders SET status = 'approved'
 WHERE id = 'T4-BWD-UPDATE';
 
-SELECT is(lifecycle_phase, 'INPRG'::lifecycle_phase,
-  'Test 4 — Backward UPDATE: status pending→in_progress → lifecycle_phase=INPRG');
+SELECT is(
+  (SELECT lifecycle_phase FROM work_orders WHERE id = 'T4-BWD-UPDATE'),
+  'APPROVED'::lifecycle_phase,
+  'Test 4 — Backward UPDATE: status pending→approved → lifecycle_phase=APPROVED'
+);
 
 ROLLBACK TO SAVEPOINT test4;
 
@@ -88,15 +101,21 @@ ROLLBACK TO SAVEPOINT test4;
 SAVEPOINT test5;
 
 INSERT INTO work_orders (id, equipment_id, asset_id, lifecycle_phase, status)
-VALUES ('T5-ANTILOOP'::text, 'EQ-TEST-5', 'MIG-TEST-ASSET', 'WAPPR', 'pending');
+VALUES ('T5-ANTILOOP', 'EQ-TEST-5', 'MIG-TEST-ASSET', 'WAPPR', 'pending');
 
-UPDATE work_orders SET description = 'Cambio irrelevante — no debe tocar estados'
+UPDATE work_orders SET symptom_note = 'Cambio irrelevante — no debe tocar estados'
 WHERE id = 'T5-ANTILOOP';
 
-SELECT is(lifecycle_phase, 'WAPPR'::lifecycle_phase,
-  'Test 5 — Anti-Loop: lifecycle_phase intacto tras UPDATE description');
-SELECT is(status, 'pending',
-  'Test 5 — Anti-Loop: status intacto tras UPDATE description');
+SELECT is(
+  (SELECT lifecycle_phase FROM work_orders WHERE id = 'T5-ANTILOOP'),
+  'WAPPR'::lifecycle_phase,
+  'Test 5 — Anti-Loop: lifecycle_phase intacto tras UPDATE symptom_note'
+);
+SELECT is(
+  (SELECT status FROM work_orders WHERE id = 'T5-ANTILOOP'),
+  'pending',
+  'Test 5 — Anti-Loop: status intacto tras UPDATE symptom_note'
+);
 
 ROLLBACK TO SAVEPOINT test5;
 
@@ -107,12 +126,18 @@ ROLLBACK TO SAVEPOINT test5;
 SAVEPOINT test6;
 
 INSERT INTO work_orders (id, equipment_id, asset_id, lifecycle_phase, status)
-VALUES ('T6-PRIORITY'::text, 'EQ-TEST-6', 'MIG-TEST-ASSET', 'COMP', 'pending');
+VALUES ('T6-PRIORITY', 'EQ-TEST-6', 'MIG-TEST-ASSET', 'COMP', 'pending');
 
-SELECT is(lifecycle_phase, 'COMP'::lifecycle_phase,
-  'Test 6 — Prioridad: lifecycle_phase=COMP preservado');
-SELECT is(status, 'completed',
-  'Test 6 — Prioridad: status sincronizado desde lifecycle_phase (pending→completed)');
+SELECT is(
+  (SELECT lifecycle_phase FROM work_orders WHERE id = 'T6-PRIORITY'),
+  'COMP'::lifecycle_phase,
+  'Test 6 — Prioridad: lifecycle_phase=COMP preservado'
+);
+SELECT is(
+  (SELECT status FROM work_orders WHERE id = 'T6-PRIORITY'),
+  'completed',
+  'Test 6 — Prioridad: status sincronizado desde lifecycle_phase (pending→completed)'
+);
 
 ROLLBACK TO SAVEPOINT test6;
 
@@ -123,7 +148,7 @@ ROLLBACK TO SAVEPOINT test6;
 SAVEPOINT test7;
 
 INSERT INTO work_orders (id, equipment_id, asset_id, lifecycle_phase)
-VALUES ('T7-FSM-REJECT'::text, 'EQ-TEST-7', 'MIG-TEST-ASSET', 'WAPPR');
+VALUES ('T7-FSM-REJECT', 'EQ-TEST-7', 'MIG-TEST-ASSET', 'WAPPR');
 
 SELECT throws_ok(
   $$ UPDATE work_orders SET lifecycle_phase = 'COMP'
@@ -141,6 +166,7 @@ ROLLBACK TO SAVEPOINT test7;
 DELETE FROM work_orders WHERE id LIKE 'T1-%' OR id LIKE 'T2-%' OR id LIKE 'T3-%'
   OR id LIKE 'T4-%' OR id LIKE 'T5-%' OR id LIKE 'T6-%' OR id LIKE 'T7-%';
 DELETE FROM assets WHERE id = 'MIG-TEST-ASSET';
+DELETE FROM asset_types WHERE id = 'TEST';
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 9. Finalizar

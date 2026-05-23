@@ -28,6 +28,10 @@ DROP POLICY IF EXISTS job_plans_select_auth ON public.job_plans;
 DROP POLICY IF EXISTS job_plans_insert_auth ON public.job_plans;
 DROP POLICY IF EXISTS job_plans_update_auth ON public.job_plans;
 DROP POLICY IF EXISTS job_plans_delete_auth ON public.job_plans;
+DROP POLICY IF EXISTS job_plans_select ON public.job_plans;
+DROP POLICY IF EXISTS job_plans_insert ON public.job_plans;
+DROP POLICY IF EXISTS job_plans_update ON public.job_plans;
+DROP POLICY IF EXISTS job_plans_delete ON public.job_plans;
 
 CREATE POLICY job_plans_select ON public.job_plans
   FOR SELECT TO authenticated USING (true);
@@ -47,6 +51,10 @@ CREATE POLICY job_plans_delete ON public.job_plans
 -- -----------------------------------------------------------
 DROP POLICY IF EXISTS job_plan_tasks_select_auth ON public.job_plan_tasks;
 DROP POLICY IF EXISTS job_plan_tasks_insert_auth ON public.job_plan_tasks;
+DROP POLICY IF EXISTS job_plan_tasks_select ON public.job_plan_tasks;
+DROP POLICY IF EXISTS job_plan_tasks_insert ON public.job_plan_tasks;
+DROP POLICY IF EXISTS job_plan_tasks_update ON public.job_plan_tasks;
+DROP POLICY IF EXISTS job_plan_tasks_delete ON public.job_plan_tasks;
 
 CREATE POLICY job_plan_tasks_select ON public.job_plan_tasks
   FOR SELECT TO authenticated USING (true);
@@ -66,6 +74,10 @@ CREATE POLICY job_plan_tasks_delete ON public.job_plan_tasks
 -- -----------------------------------------------------------
 DROP POLICY IF EXISTS job_plan_materials_select_auth ON public.job_plan_materials;
 DROP POLICY IF EXISTS job_plan_materials_insert_auth ON public.job_plan_materials;
+DROP POLICY IF EXISTS job_plan_materials_select ON public.job_plan_materials;
+DROP POLICY IF EXISTS job_plan_materials_insert ON public.job_plan_materials;
+DROP POLICY IF EXISTS job_plan_materials_update ON public.job_plan_materials;
+DROP POLICY IF EXISTS job_plan_materials_delete ON public.job_plan_materials;
 
 CREATE POLICY job_plan_materials_select ON public.job_plan_materials
   FOR SELECT TO authenticated USING (true);
@@ -89,6 +101,10 @@ CREATE POLICY job_plan_materials_delete ON public.job_plan_materials
 -- -----------------------------------------------------------
 DROP POLICY IF EXISTS pm_schedules_select_auth ON public.pm_schedules;
 DROP POLICY IF EXISTS pm_schedules_insert_auth ON public.pm_schedules;
+DROP POLICY IF EXISTS pm_schedules_select ON public.pm_schedules;
+DROP POLICY IF EXISTS pm_schedules_insert ON public.pm_schedules;
+DROP POLICY IF EXISTS pm_schedules_update ON public.pm_schedules;
+DROP POLICY IF EXISTS pm_schedules_delete ON public.pm_schedules;
 
 CREATE POLICY pm_schedules_select ON public.pm_schedules
   FOR SELECT TO authenticated USING (true);
@@ -112,6 +128,10 @@ CREATE POLICY pm_schedules_delete ON public.pm_schedules
 -- -----------------------------------------------------------
 DROP POLICY IF EXISTS meters_select_auth ON public.meters;
 DROP POLICY IF EXISTS meters_insert_auth ON public.meters;
+DROP POLICY IF EXISTS meters_select ON public.meters;
+DROP POLICY IF EXISTS meters_insert ON public.meters;
+DROP POLICY IF EXISTS meters_update ON public.meters;
+DROP POLICY IF EXISTS meters_delete ON public.meters;
 
 CREATE POLICY meters_select ON public.meters
   FOR SELECT TO authenticated USING (true);
@@ -131,6 +151,10 @@ CREATE POLICY meters_delete ON public.meters
 -- -----------------------------------------------------------
 DROP POLICY IF EXISTS measure_points_select_auth ON public.measure_points;
 DROP POLICY IF EXISTS measure_points_insert_auth ON public.measure_points;
+DROP POLICY IF EXISTS measure_points_select ON public.measure_points;
+DROP POLICY IF EXISTS measure_points_insert ON public.measure_points;
+DROP POLICY IF EXISTS measure_points_update ON public.measure_points;
+DROP POLICY IF EXISTS measure_points_delete ON public.measure_points;
 
 CREATE POLICY measure_points_select ON public.measure_points
   FOR SELECT TO authenticated USING (true);
@@ -156,6 +180,10 @@ CREATE POLICY measure_points_delete ON public.measure_points
 -- -----------------------------------------------------------
 DROP POLICY IF EXISTS meter_readings_select_auth ON public.meter_readings;
 DROP POLICY IF EXISTS meter_readings_insert_auth ON public.meter_readings;
+DROP POLICY IF EXISTS meter_readings_select ON public.meter_readings;
+DROP POLICY IF EXISTS meter_readings_insert ON public.meter_readings;
+DROP POLICY IF EXISTS meter_readings_update ON public.meter_readings;
+DROP POLICY IF EXISTS meter_readings_delete ON public.meter_readings;
 
 CREATE POLICY meter_readings_select ON public.meter_readings
   FOR SELECT TO authenticated USING (true);
