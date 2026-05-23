@@ -1,6 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
 import * as Sentry from "@sentry/react";
+import { industrialTheme } from './theme/industrialTheme.js';
 import './index.css'
 import App from './App.jsx'
 
@@ -20,6 +23,9 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <App />
+    <ThemeProvider theme={industrialTheme}>
+      <CssBaseline />
+      <App />
+    </ThemeProvider>
   </StrictMode>,
 )

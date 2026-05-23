@@ -2,6 +2,26 @@ import { getPhaseLabel, getPhaseColor } from '../fsm.js';
 
 const CRITICALITY_COLORS = { A: 'error', B: 'warning', C: 'success' };
 
+const WO_TYPE_LABELS = {
+  preventive: 'Preventivo',
+  corrective: 'Correctivo',
+  predictive: 'Predictivo',
+  emergency: 'Emergencia',
+  inspection: 'Inspección',
+  CBM: 'CBM',
+  PM: 'Preventivo'
+};
+
+const WO_TYPE_COLORS = {
+  preventive: 'primary',
+  corrective: 'secondary',
+  predictive: 'info',
+  emergency: 'error',
+  inspection: 'default',
+  CBM: 'warning',
+  PM: 'primary'
+};
+
 function formatDate(dateStr) {
   if (!dateStr) return '';
   try {
@@ -13,6 +33,7 @@ function formatDate(dateStr) {
 
 export function toViewModel(doc) {
   if (!doc) return null;
+  const woType = doc.wo_type || '';
   return {
     id: doc.id,
     equipmentId: doc.equipment_id || '',
@@ -27,7 +48,11 @@ export function toViewModel(doc) {
     isDeleted: Boolean(doc._deleted),
     scheduledDate: formatDate(doc.scheduled_date),
     assetId: doc.asset_id || '',
-    woType: doc.wo_type || '',
+    woType,
+    woTypeLabel: WO_TYPE_LABELS[woType] || woType,
+    woTypeColor: WO_TYPE_COLORS[woType] || 'default',
+    symptomNote: doc.symptom_note || '',
+    jobPlanId: doc.job_plan_id || '',
     plannedHours: doc.planned_hours || 0
   };
 }

@@ -48,34 +48,26 @@ function App() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f4f6f8', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
 
       {/* ── AppBar ── */}
-      <AppBar
-        position="sticky"
-        top={0}
-        elevation={0}
-        sx={{
-          background: 'linear-gradient(90deg, #1565c0 0%, #1976d2 100%)',
-          borderBottom: '1px solid rgba(255,255,255,0.12)',
-          zIndex: 1200,
-        }}
-      >
+      <AppBar position="sticky" top={0} elevation={0} sx={{ zIndex: 1200 }}>
         <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 2, md: 4 } }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Typography
               variant="h6"
               fontWeight="800"
-              sx={{ letterSpacing: 0.5, color: 'white', fontSize: { xs: '1rem', md: '1.2rem' } }}
+              sx={{ letterSpacing: 0.5, fontSize: { xs: '1rem', md: '1.2rem' } }}
             >
               CMMS Ibero
             </Typography>
             <Typography
               variant="caption"
               sx={{
-                color: 'rgba(255,255,255,0.6)',
+                opacity: 0.7,
                 display: { xs: 'none', md: 'block' },
-                borderLeft: '1px solid rgba(255,255,255,0.3)',
+                borderLeft: 1,
+                borderColor: 'divider',
                 pl: 1.5,
               }}
             >
@@ -84,7 +76,7 @@ function App() {
           </Box>
 
           {loading ? (
-            <Typography variant="body2" sx={{ opacity: 0.7, color: 'white' }}>
+            <Typography variant="body2" sx={{ opacity: 0.7 }}>
               Cargando…
             </Typography>
           ) : error ? (
@@ -114,15 +106,7 @@ function App() {
         </Tabs>
 
         {activeTab === 0 ? (
-          <Paper
-            elevation={0}
-            sx={{
-              borderRadius: 3,
-              border: '1px solid #e0e0e0',
-              bgcolor: 'white',
-              p: 3,
-            }}
-          >
+          <Paper variant="outlined" sx={{ p: 3 }}>
             <MechanicDashboard />
           </Paper>
         ) : (
@@ -130,30 +114,14 @@ function App() {
 
             {/* Columna principal: Árbol de activos */}
             <Grid size={{ xs: 12, md: 8, lg: 9 }}>
-              <Paper
-                elevation={0}
-                sx={{
-                  borderRadius: 3,
-                  border: '1px solid #e0e0e0',
-                  bgcolor: 'white',
-                  overflow: 'hidden',
-                }}
-              >
+              <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
                 <AssetTree onSelectAsset={handleSelectAsset} />
               </Paper>
             </Grid>
 
             {/* Columna lateral: Estadísticas / ayuda rápida en desktop */}
             <Grid size={{ xs: 12, md: 4, lg: 3 }}>
-              <Paper
-                elevation={0}
-                sx={{
-                  borderRadius: 3,
-                  border: '1px solid #e0e0e0',
-                  bgcolor: 'white',
-                  p: 3,
-                }}
-              >
+              <Paper variant="outlined" sx={{ p: 3 }}>
                 <Typography variant="subtitle2" fontWeight="700" color="primary.main" gutterBottom>
                   💡 Cómo navegar
                 </Typography>
@@ -167,7 +135,7 @@ function App() {
                   Al seleccionar un equipo, se abre el <strong>panel de detalles</strong> con sus especificaciones técnicas.
                 </Typography>
 
-                <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid #f0f0f0' }}>
+                <Box sx={{ mt: 3, pt: 2, borderTop: 1, borderColor: 'divider' }}>
                   <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 0.5 }}>
                     Base de datos
                   </Typography>

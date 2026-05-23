@@ -1,6 +1,6 @@
 # Backlog Técnico — CMMS Ibero
 
-> Última actualización: 2026-05-21
+> Última actualización: 2026-05-22
 
 ---
 
@@ -47,6 +47,29 @@
 ---
 
 ## [DEUDA TÉCNICA - INFRAESTRUCTURA]
+
+### ✅ RESUELTO: Schema Drift — Producción vs ISO 14224
+
+**Resuelto en**: `2026-05-22` — Migración `20260522000003_work_orders_iso14224_production`
+
+**Qué se hizo**:
+- Creados ENUMs `lifecycle_phase` y `block_reason` (idempotente)
+- Agregadas 25 columnas ISO 14224 como NULLable (ALTER TABLE ADD COLUMN IF NOT EXISTS)
+- Reemplazado FSM trigger: valida `lifecycle_phase` en vez de `status`
+- Creado trigger de sincronía bidireccional `lifecycle_phase ↔ status`
+- `wo_type_enum` extendido con valor `'PM'`
+- `job_plans`, `pm_schedules`, `meters`, `measure_points` creados en producción
+- `generate_due_preventive_work_orders()` desplegada (adaptada: pm_schedules.asset_id INTEGER)
+
+**Preservado**:
+- RxDB columns (`_deleted`, `_conflict`, `updated_at` BIGINT) — **NO se tocaron**
+- `work_orders.id` como TEXT — **NO se cambió a UUID** (evita cascada de FKs)
+- `status` VARCHAR — **NO se dropeó**, mantenida por trigger de sincronía
+- Todos los datos históricos (3 OTs) migrados con legacy_id y mapeo de timestamps
+
+**Verificación**: 6/6 tests de sincronía pasan en producción ✅
+
+---
 
 **NOTA**: Cuando el entorno local cuente con Docker, se deben migrar las pruebas de integración de la Edge Function `epicor-webhook` para ejecutarse localmente mediante `supabase functions serve`, tal como se hizo con `oee-trigger`.
 
