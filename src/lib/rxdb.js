@@ -229,6 +229,26 @@ const materialRequestSchema = {
   required: ['id', 'work_order_id', 'line_desc', 'requested_qty']
 };
 
+const laborRecordSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    work_order_id: { type: 'string', maxLength: 50 },
+    technician_id: { type: 'string', maxLength: 50 },
+    start_time: { type: 'string' },
+    end_time: { type: 'string' },
+    activity_code: { type: 'string', enum: ['DIRECT_WORK', 'WAIT_MATERIAL', 'WAIT_PERMIT', 'TRAVEL', 'BREAK'] },
+    notes: { type: 'string' },
+    device_timestamp: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'number' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'work_order_id', 'technician_id', 'start_time', 'activity_code']
+};
+
 const workOrdersMigrationV4 = {
   4: async (oldDoc) => {
     const oldBlockReasonMap = {
@@ -292,7 +312,8 @@ async function _createDatabase() {
       },
       assets: { schema: assetSchema },
       asset_hierarchy: { schema: assetHierarchySchema },
-      material_requests: { schema: materialRequestSchema }
+      material_requests: { schema: materialRequestSchema },
+      labor_records: { schema: laborRecordSchema }
     });
   } catch (err) {
     const errorStr = String(err);
@@ -311,7 +332,8 @@ async function _createDatabase() {
         },
         assets: { schema: assetSchema },
         asset_hierarchy: { schema: assetHierarchySchema },
-        material_requests: { schema: materialRequestSchema }
+        material_requests: { schema: materialRequestSchema },
+        labor_records: { schema: laborRecordSchema }
       });
       newDb.work_orders.preSave((plainData, doc) => {
         const oldPhase = doc.lifecycle_phase;
@@ -351,17 +373,16 @@ export async function initRxDB() {
 
   console.log('[RxDB] Inicializando base de datos...');
 
-  initPromise = _createDatabase()
-    .then(db => {
-      dbInstance = db;
-      console.log('[RxDB] Instancia creada exitosamente');
-      return db;
-    })
-    .catch(err => {
-      console.error('[RxDB] Error en inicialización:', err);
-      initPromise = null;
-      throw err;
-    });
+  try {
+    const db = await _createDatabase();
+    dbInstance = db;
+    console.log('[RxDB] Instancia creada exitosamente');
+    initPromise = db;
+  } catch (err) {
+    console.error('[RxDB] Error en inicialización:', err);
+    initPromise = null;
+    throw err;
+  }
 
   return initPromise;
 }
@@ -505,6 +526,11 @@ const WORK_ORDER_PUSH_FIELDS = [
   '_conflict'
 ];
 
+const LABOR_RECORD_PUSH_FIELDS = [
+  'id', 'work_order_id', 'technician_id', 'start_time', 'end_time',
+  'activity_code', 'notes', 'device_timestamp', 'created_at', 'updated_at'
+];
+
 function createWorkOrderPushHandler(tableName) {
   return async (docs) => {
     console.log(`[RxDB Sync] Iniciando push de ${tableName}. Documentos:`, docs);
@@ -557,6 +583,128 @@ function createWorkOrderPushHandler(tableName) {
             }
             return [];
           }
+          throw error;
+        }
+      }
+
+      if (deletes.length > 0) {
+        const { error } = await supabase
+          .from(tableName)
+          .update({ _deleted: true })
+          .in('id', deletes.map(d => d.id));
+
+        if (error) {
+          console.error(`[RxDB Sync] Error en push delete de ${tableName}:`, error);
+          throw error;
+        }
+      }
+
+      console.log(`[RxDB Sync] Push de ${tableName} completado exitosamente`);
+      return [];
+    } catch (err) {
+      console.error(`[RxDB Sync] Excepción en push de ${tableName}:`, err);
+      throw err;
+    }
+  };
+}
+
+// ── Labor Records Pull (custom: filtered by technician_id) ──
+function createLaborPullHandler(tableName, orderField = 'updated_at') {
+  return async (checkpoint, batchSize = BATCH_SIZE) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) {
+      console.error('[RxDB Sync] No authenticated session for labor pull');
+      throw new Error('No authenticated user for labor_records sync');
+    }
+    const userId = session.user.id;
+
+    console.log(`[RxDB Sync] Iniciando pull de ${tableName} para technician ${userId}. Checkpoint:`, checkpoint);
+
+    let query = supabase
+      .from(tableName)
+      .select('*')
+      .eq('technician_id', userId)
+      .order(orderField, { ascending: true })
+      .order('id', { ascending: true })
+      .limit(batchSize);
+
+    if (checkpoint?.lastModified && checkpoint?.lastId) {
+      query = query.or(
+        `${orderField}.gt.${checkpoint.lastModified},and(${orderField}.eq.${checkpoint.lastModified},id.gt.${checkpoint.lastId})`
+      );
+    }
+
+    try {
+      const { data, error } = await query;
+      if (error) {
+        console.error(`[RxDB Sync] Error en consulta pull de ${tableName}:`, error);
+        throw error;
+      }
+
+      console.log(`[RxDB Sync] Consulta pull de ${tableName} exitosa. Registros devueltos: ${data ? data.length : 0}`);
+
+      const mappedDocs = data.map(doc => {
+        const mapped = { ...doc };
+
+        if ('_deleted' in doc) {
+          mapped._deleted = !!doc._deleted;
+        } else if ('is_deleted' in doc) {
+          mapped._deleted = !!doc.is_deleted;
+          delete mapped.is_deleted;
+        } else {
+          mapped._deleted = false;
+        }
+
+        if (typeof doc.updated_at === 'string') {
+          mapped.updated_at = new Date(doc.updated_at).getTime() || Date.now();
+        } else if (!doc.updated_at) {
+          mapped.updated_at = Date.now();
+        }
+
+        return mapped;
+      });
+
+      const lastDoc = data[data.length - 1];
+      const newCheckpoint = lastDoc
+        ? { lastModified: lastDoc[orderField], lastId: lastDoc.id }
+        : checkpoint;
+
+      console.log(`[RxDB Sync] Pull de ${tableName} completado. Checkpoint nuevo:`, newCheckpoint);
+      return { documents: mappedDocs, checkpoint: newCheckpoint };
+    } catch (err) {
+      console.error(`[RxDB Sync] Excepción en pull de ${tableName}:`, err);
+      throw err;
+    }
+  };
+}
+
+// ── Labor Records Push ──
+function createLaborPushHandler(tableName) {
+  return async (docs) => {
+    console.log(`[RxDB Sync] Iniciando push de ${tableName}. Documentos:`, docs);
+    const upserts = docs.filter(d => !d._deleted);
+    const deletes = docs.filter(d => d._deleted);
+
+    try {
+      if (upserts.length > 0) {
+        const mappedUpserts = upserts.map(d => {
+          const obj = { _deleted: false };
+          LABOR_RECORD_PUSH_FIELDS.forEach(f => {
+            if (f === 'updated_at') {
+              obj.updated_at = new Date(d.updated_at).toISOString();
+            } else {
+              obj[f] = d[f];
+            }
+          });
+          return obj;
+        });
+
+        const { error } = await supabase
+          .from(tableName)
+          .upsert(mappedUpserts, { onConflict: 'id' });
+
+        if (error) {
+          console.error(`[RxDB Sync] Error en push upsert de ${tableName}:`, error);
           throw error;
         }
       }
@@ -648,6 +796,19 @@ export async function startAllReplications(db) {
     push: { handler: mrPush }
   });
 
+  // Labor Records (custom pull: technician_id filter)
+  const laborPull = createLaborPullHandler('labor_records', 'updated_at');
+  const laborPush = createLaborPushHandler('labor_records');
+
+  replicationStates.labor_records = replicateRxCollection({
+    collection: db.labor_records,
+    replicationIdentifier: 'cmms-lr-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: laborPull },
+    push: { handler: laborPush }
+  });
+
   // Suscripciones a estados
   Object.entries(replicationStates).forEach(([key, state]) => {
     state.active$.subscribe(isActive => {
@@ -665,6 +826,7 @@ export async function startAllReplications(db) {
 function getPullOrderField(collectionName) {
   if (collectionName === 'assets') return 'updated_at_ms';
   if (collectionName === 'asset_hierarchy') return 'id';
+  if (collectionName === 'labor_records') return 'updated_at';
   return 'updated_at';
 }
 
@@ -683,6 +845,7 @@ function getPushHandler(collectionName) {
       'id', 'parent_id', 'child_id', 'hierarchy_level', 'created_at'
     ]);
   }
+  if (collectionName === 'labor_records') return createLaborPushHandler(collectionName);
   return createPushHandler(collectionName, []);
 }
 
@@ -870,4 +1033,4 @@ export function useAssets() {
   return { assets, hierarchy, assetTree, loading, error, syncStatus, refreshAssets };
 }
 
-export { workOrderSchema, assetSchema, assetHierarchySchema, materialRequestSchema };
+export { workOrderSchema, assetSchema, assetHierarchySchema, materialRequestSchema, laborRecordSchema };
