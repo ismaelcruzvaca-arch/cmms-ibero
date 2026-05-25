@@ -23,7 +23,7 @@ const BATCH_SIZE = 50;
 // SCHEMAS DE RXDB (JSON puro, sin funciones)
 // ============================================
 const workOrderSchema = {
-  version: 4,
+  version: 5,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -98,6 +98,10 @@ const workOrderSchema = {
     close_reason: { type: 'string' },
     cancel_reason: { type: 'string' },
     updated_at: { type: 'number' },
+
+    // ── Auditoría / Sampling (checklist-evidence-system) ──
+    is_auditable: { type: 'boolean' },
+    audit_reason: { type: 'string' },
 
     // ── RxDB / Replicación ──
     _conflict: { type: 'boolean' },
@@ -289,7 +293,18 @@ const workOrdersMigrationV4 = {
   }
 };
 
-// ============================================
+// Migration v4→v5: add is_auditable + audit_reason
+const workOrdersMigrationV5 = {
+  5: async (oldDoc) => {
+    return {
+      ...oldDoc,
+      is_auditable: oldDoc.is_auditable || false,
+      audit_reason: oldDoc.audit_reason || '',
+    };
+  }
+};
+
+// ============================================================
 // SINGLETON PATTERN
 // Evita Error DB8 en React StrictMode
 // ============================================
@@ -307,13 +322,19 @@ async function _createDatabase() {
   try {
     await db.addCollections({
       work_orders: {
-        schema: workOrderSchema,
-        migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4 }
-      },
-      assets: { schema: assetSchema },
+      schema: workOrderSchema,
+          migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4, ...workOrdersMigrationV5 }
+        },
+        assets: { schema: assetSchema },
       asset_hierarchy: { schema: assetHierarchySchema },
       material_requests: { schema: materialRequestSchema },
-      labor_records: { schema: laborRecordSchema }
+      labor_records: { schema: laborRecordSchema },
+      // ── Checklist Collections ──
+      causa_falla_catalog: { schema: causaFallaSchema },
+      checklist_templates: { schema: checklistTemplateSchema },
+      checklist_instances: { schema: checklistInstanceSchema },
+      checklist_item_responses: { schema: checklistItemResponseSchema },
+      checklist_sampling_config: { schema: checklistSamplingConfigSchema }
     });
   } catch (err) {
     const errorStr = String(err);
@@ -328,12 +349,17 @@ async function _createDatabase() {
       await newDb.addCollections({
         work_orders: {
           schema: workOrderSchema,
-          migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4 }
+        migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4, ...workOrdersMigrationV5 }
         },
         assets: { schema: assetSchema },
         asset_hierarchy: { schema: assetHierarchySchema },
         material_requests: { schema: materialRequestSchema },
-        labor_records: { schema: laborRecordSchema }
+        labor_records: { schema: laborRecordSchema },
+        causa_falla_catalog: { schema: causaFallaSchema },
+        checklist_templates: { schema: checklistTemplateSchema },
+        checklist_instances: { schema: checklistInstanceSchema },
+        checklist_item_responses: { schema: checklistItemResponseSchema },
+        checklist_sampling_config: { schema: checklistSamplingConfigSchema }
       });
       newDb.work_orders.preSave((plainData, doc) => {
         const oldPhase = doc.lifecycle_phase;
@@ -523,6 +549,7 @@ const WORK_ORDER_PUSH_FIELDS = [
   'asset_class', 'part_in_process', 'symptom_note', 'cause_note',
   'action_note', 'resolution_note', 'reported_by', 'created_by',
   'maintenance_reference', 'revision', 'legacy_id', 'job_plan_id', 'meter_id',
+  'is_auditable', 'audit_reason',
   '_conflict'
 ];
 
@@ -809,6 +836,69 @@ export async function startAllReplications(db) {
     push: { handler: laborPush }
   });
 
+  // ── Checklist Replications ──
+  // causa_falla_catalog (pull-only — catálogo fijo)
+  replicationStates.causa_falla_catalog = replicateRxCollection({
+    collection: db.causa_falla_catalog,
+    replicationIdentifier: 'cmms-cfc-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('causa_falla_catalog', 'id') },
+    push: { handler: createPushHandler('causa_falla_catalog', ['id', 'code', 'name', 'description']) }
+  });
+
+  // checklist_templates (pull-only — leídos del servidor)
+  replicationStates.checklist_templates = replicateRxCollection({
+    collection: db.checklist_templates,
+    replicationIdentifier: 'cmms-ct-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('checklist_templates', 'updated_at') },
+    push: { handler: createPushHandler('checklist_templates', [
+      'id', 'code', 'description', 'module_id', 'job_plan_id', 'block_type',
+      'sampling_rate', 'is_auditable', 'is_active', 'created_at', 'updated_at'
+    ]) }
+  });
+
+  // checklist_instances (pull + push — creadas localmente, sincronizadas)
+  replicationStates.checklist_instances = replicateRxCollection({
+    collection: db.checklist_instances,
+    replicationIdentifier: 'cmms-ci-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('checklist_instances', 'created_at') },
+    push: { handler: createPushHandler('checklist_instances', [
+      'id', 'work_order_id', 'checklist_template_id', 'technician_id', 'asset_id',
+      'evaluator_source', 'evaluated_by', 'verified_by', 'verified_at',
+      'status', 'started_at', 'completed_at', 'notes', 'created_at'
+    ]) }
+  });
+
+  // checklist_item_responses (pull + push)
+  replicationStates.checklist_item_responses = replicateRxCollection({
+    collection: db.checklist_item_responses,
+    replicationIdentifier: 'cmms-cir-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('checklist_item_responses', 'answered_at') },
+    push: { handler: createPushHandler('checklist_item_responses', [
+      'id', 'checklist_instance_id', 'template_item_id', 'status',
+      'causa_falla_id', 'comment', 'photo_url', 'measurement_value', 'answered_at'
+    ]) }
+  });
+
+  // checklist_sampling_config (pull-only — leídos del servidor)
+  replicationStates.checklist_sampling_config = replicateRxCollection({
+    collection: db.checklist_sampling_config,
+    replicationIdentifier: 'cmms-csc-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('checklist_sampling_config', 'id') },
+    push: { handler: createPushHandler('checklist_sampling_config', [
+      'id', 'module_id', 'job_plan_id', 'block_type',
+      'default_sampling_rate', 'is_auditable_only', 'is_active'
+    ]) }
+  });
   // Suscripciones a estados
   Object.entries(replicationStates).forEach(([key, state]) => {
     state.active$.subscribe(isActive => {
@@ -1033,4 +1123,102 @@ export function useAssets() {
   return { assets, hierarchy, assetTree, loading, error, syncStatus, refreshAssets };
 }
 
-export { workOrderSchema, assetSchema, assetHierarchySchema, materialRequestSchema, laborRecordSchema };
+// ============================================
+// CHECKLIST SCHEMAS
+// ============================================
+
+const causaFallaSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    code: { type: 'string', maxLength: 30 },
+    name: { type: 'string' },
+    description: { type: 'string' }
+  },
+  required: ['id', 'code', 'name']
+};
+
+const checklistTemplateSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    code: { type: 'string', maxLength: 50 },
+    description: { type: 'string' },
+    module_id: { type: 'string', maxLength: 50 },
+    job_plan_id: { type: 'string', maxLength: 50 },
+    block_type: { type: 'string', enum: ['A', 'B', 'C'] },
+    sampling_rate: { type: 'number' },
+    is_auditable: { type: 'boolean' },
+    is_active: { type: 'boolean' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'number' }
+  },
+  required: ['id', 'code', 'description', 'module_id', 'block_type']
+};
+
+const checklistInstanceSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    work_order_id: { type: 'string', maxLength: 50 },
+    checklist_template_id: { type: 'string', maxLength: 50 },
+    technician_id: { type: 'string', maxLength: 50 },
+    asset_id: { type: 'string', maxLength: 100 },
+    evaluator_source: { type: 'string', enum: ['SELF', 'SUPERVISOR', 'PEER'] },
+    evaluated_by: { type: 'string', maxLength: 50 },
+    verified_by: { type: 'string', maxLength: 50 },
+    verified_at: { type: 'string' },
+    status: { type: 'string', enum: ['IN_PROGRESS', 'COMPLETED', 'VOID'] },
+    started_at: { type: 'string' },
+    completed_at: { type: 'string' },
+    notes: { type: 'string' },
+    created_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'work_order_id', 'checklist_template_id', 'technician_id', 'asset_id', 'status']
+};
+
+const checklistItemResponseSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    checklist_instance_id: { type: 'string', maxLength: 50 },
+    template_item_id: { type: 'string', maxLength: 50 },
+    status: { type: 'string', enum: ['PASS', 'FAIL', 'NA', 'SKIPPED'] },
+    causa_falla_id: { type: 'string', maxLength: 50 },
+    comment: { type: 'string' },
+    photo_url: { type: 'string' },
+    measurement_value: { type: 'number' },
+    answered_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'checklist_instance_id', 'template_item_id', 'status']
+};
+
+const checklistSamplingConfigSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    module_id: { type: 'string', maxLength: 50 },
+    job_plan_id: { type: 'string', maxLength: 50 },
+    block_type: { type: 'string', enum: ['A', 'B', 'C'] },
+    default_sampling_rate: { type: 'number' },
+    is_auditable_only: { type: 'boolean' },
+    is_active: { type: 'boolean' }
+  },
+  required: ['id', 'block_type']
+};
+
+export { workOrderSchema, assetSchema, assetHierarchySchema, materialRequestSchema, laborRecordSchema,
+         causaFallaSchema, checklistTemplateSchema, checklistInstanceSchema,
+         checklistItemResponseSchema, checklistSamplingConfigSchema };
