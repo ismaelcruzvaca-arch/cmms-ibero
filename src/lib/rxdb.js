@@ -23,7 +23,7 @@ const BATCH_SIZE = 50;
 // SCHEMAS DE RXDB (JSON puro, sin funciones)
 // ============================================
 const workOrderSchema = {
-  version: 4,
+  version: 5,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -98,6 +98,10 @@ const workOrderSchema = {
     close_reason: { type: 'string' },
     cancel_reason: { type: 'string' },
     updated_at: { type: 'number' },
+
+    // ── Auditoría / Sampling (checklist-evidence-system) ──
+    is_auditable: { type: 'boolean' },
+    audit_reason: { type: 'string' },
 
     // ── RxDB / Replicación ──
     _conflict: { type: 'boolean' },
@@ -229,6 +233,26 @@ const materialRequestSchema = {
   required: ['id', 'work_order_id', 'line_desc', 'requested_qty']
 };
 
+const laborRecordSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    work_order_id: { type: 'string', maxLength: 50 },
+    technician_id: { type: 'string', maxLength: 50 },
+    start_time: { type: 'string' },
+    end_time: { type: 'string' },
+    activity_code: { type: 'string', enum: ['DIRECT_WORK', 'WAIT_MATERIAL', 'WAIT_PERMIT', 'TRAVEL', 'BREAK'] },
+    notes: { type: 'string' },
+    device_timestamp: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'number' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'work_order_id', 'technician_id', 'start_time', 'activity_code']
+};
+
 const workOrdersMigrationV4 = {
   4: async (oldDoc) => {
     const oldBlockReasonMap = {
@@ -269,7 +293,18 @@ const workOrdersMigrationV4 = {
   }
 };
 
-// ============================================
+// Migration v4→v5: add is_auditable + audit_reason
+const workOrdersMigrationV5 = {
+  5: async (oldDoc) => {
+    return {
+      ...oldDoc,
+      is_auditable: oldDoc.is_auditable || false,
+      audit_reason: oldDoc.audit_reason || '',
+    };
+  }
+};
+
+// ============================================================
 // SINGLETON PATTERN
 // Evita Error DB8 en React StrictMode
 // ============================================
@@ -287,10 +322,10 @@ async function _createDatabase() {
   try {
     await db.addCollections({
       work_orders: {
-        schema: workOrderSchema,
-        migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4 }
-      },
-      assets: { schema: assetSchema },
+      schema: workOrderSchema,
+          migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4, ...workOrdersMigrationV5 }
+        },
+        assets: { schema: assetSchema },
       asset_hierarchy: { schema: assetHierarchySchema },
       material_requests: { schema: materialRequestSchema },
       labor_records: { schema: laborRecordSchema },
@@ -319,7 +354,7 @@ async function _createDatabase() {
       await newDb.addCollections({
         work_orders: {
           schema: workOrderSchema,
-          migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4 }
+        migrationStrategies: { ...workOrdersMigrationV2, ...workOrdersMigrationV3, ...workOrdersMigrationV4, ...workOrdersMigrationV5 }
         },
         assets: { schema: assetSchema },
         asset_hierarchy: { schema: assetHierarchySchema },
@@ -373,17 +408,16 @@ export async function initRxDB() {
 
   console.log('[RxDB] Inicializando base de datos...');
 
-  initPromise = _createDatabase()
-    .then(db => {
-      dbInstance = db;
-      console.log('[RxDB] Instancia creada exitosamente');
-      return db;
-    })
-    .catch(err => {
-      console.error('[RxDB] Error en inicialización:', err);
-      initPromise = null;
-      throw err;
-    });
+  try {
+    const db = await _createDatabase();
+    dbInstance = db;
+    console.log('[RxDB] Instancia creada exitosamente');
+    initPromise = db;
+  } catch (err) {
+    console.error('[RxDB] Error en inicialización:', err);
+    initPromise = null;
+    throw err;
+  }
 
   return initPromise;
 }
@@ -524,7 +558,13 @@ const WORK_ORDER_PUSH_FIELDS = [
   'asset_class', 'part_in_process', 'symptom_note', 'cause_note',
   'action_note', 'resolution_note', 'reported_by', 'created_by',
   'maintenance_reference', 'revision', 'legacy_id', 'job_plan_id', 'meter_id',
+  'is_auditable', 'audit_reason',
   '_conflict'
+];
+
+const LABOR_RECORD_PUSH_FIELDS = [
+  'id', 'work_order_id', 'technician_id', 'start_time', 'end_time',
+  'activity_code', 'notes', 'device_timestamp', 'created_at', 'updated_at'
 ];
 
 function createWorkOrderPushHandler(tableName) {
@@ -579,6 +619,128 @@ function createWorkOrderPushHandler(tableName) {
             }
             return [];
           }
+          throw error;
+        }
+      }
+
+      if (deletes.length > 0) {
+        const { error } = await supabase
+          .from(tableName)
+          .update({ _deleted: true })
+          .in('id', deletes.map(d => d.id));
+
+        if (error) {
+          console.error(`[RxDB Sync] Error en push delete de ${tableName}:`, error);
+          throw error;
+        }
+      }
+
+      console.log(`[RxDB Sync] Push de ${tableName} completado exitosamente`);
+      return [];
+    } catch (err) {
+      console.error(`[RxDB Sync] Excepción en push de ${tableName}:`, err);
+      throw err;
+    }
+  };
+}
+
+// ── Labor Records Pull (custom: filtered by technician_id) ──
+function createLaborPullHandler(tableName, orderField = 'updated_at') {
+  return async (checkpoint, batchSize = BATCH_SIZE) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) {
+      console.error('[RxDB Sync] No authenticated session for labor pull');
+      throw new Error('No authenticated user for labor_records sync');
+    }
+    const userId = session.user.id;
+
+    console.log(`[RxDB Sync] Iniciando pull de ${tableName} para technician ${userId}. Checkpoint:`, checkpoint);
+
+    let query = supabase
+      .from(tableName)
+      .select('*')
+      .eq('technician_id', userId)
+      .order(orderField, { ascending: true })
+      .order('id', { ascending: true })
+      .limit(batchSize);
+
+    if (checkpoint?.lastModified && checkpoint?.lastId) {
+      query = query.or(
+        `${orderField}.gt.${checkpoint.lastModified},and(${orderField}.eq.${checkpoint.lastModified},id.gt.${checkpoint.lastId})`
+      );
+    }
+
+    try {
+      const { data, error } = await query;
+      if (error) {
+        console.error(`[RxDB Sync] Error en consulta pull de ${tableName}:`, error);
+        throw error;
+      }
+
+      console.log(`[RxDB Sync] Consulta pull de ${tableName} exitosa. Registros devueltos: ${data ? data.length : 0}`);
+
+      const mappedDocs = data.map(doc => {
+        const mapped = { ...doc };
+
+        if ('_deleted' in doc) {
+          mapped._deleted = !!doc._deleted;
+        } else if ('is_deleted' in doc) {
+          mapped._deleted = !!doc.is_deleted;
+          delete mapped.is_deleted;
+        } else {
+          mapped._deleted = false;
+        }
+
+        if (typeof doc.updated_at === 'string') {
+          mapped.updated_at = new Date(doc.updated_at).getTime() || Date.now();
+        } else if (!doc.updated_at) {
+          mapped.updated_at = Date.now();
+        }
+
+        return mapped;
+      });
+
+      const lastDoc = data[data.length - 1];
+      const newCheckpoint = lastDoc
+        ? { lastModified: lastDoc[orderField], lastId: lastDoc.id }
+        : checkpoint;
+
+      console.log(`[RxDB Sync] Pull de ${tableName} completado. Checkpoint nuevo:`, newCheckpoint);
+      return { documents: mappedDocs, checkpoint: newCheckpoint };
+    } catch (err) {
+      console.error(`[RxDB Sync] Excepción en pull de ${tableName}:`, err);
+      throw err;
+    }
+  };
+}
+
+// ── Labor Records Push ──
+function createLaborPushHandler(tableName) {
+  return async (docs) => {
+    console.log(`[RxDB Sync] Iniciando push de ${tableName}. Documentos:`, docs);
+    const upserts = docs.filter(d => !d._deleted);
+    const deletes = docs.filter(d => d._deleted);
+
+    try {
+      if (upserts.length > 0) {
+        const mappedUpserts = upserts.map(d => {
+          const obj = { _deleted: false };
+          LABOR_RECORD_PUSH_FIELDS.forEach(f => {
+            if (f === 'updated_at') {
+              obj.updated_at = new Date(d.updated_at).toISOString();
+            } else {
+              obj[f] = d[f];
+            }
+          });
+          return obj;
+        });
+
+        const { error } = await supabase
+          .from(tableName)
+          .upsert(mappedUpserts, { onConflict: 'id' });
+
+        if (error) {
+          console.error(`[RxDB Sync] Error en push upsert de ${tableName}:`, error);
           throw error;
         }
       }
@@ -780,7 +942,7 @@ export async function startAllReplications(db) {
     'id', 'asset_id', 'component_id', 'failure_mode_id',
     'severity', 'occurrence', 'detection',
     'q1', 'q2', 'q3', 'q4', 'q5',
-    'recommended_strategy', 'failure_cause', 'mitigations', 'frequency',
+    'recommended_strategy', 'failure_cause', 'mitigation_actions', 'recommended_frequency',
     'analyzed_by', 'notes', 'created_at', 'updated_at'
   ]);
 
@@ -839,7 +1001,7 @@ function getPushHandler(collectionName) {
       'id', 'asset_id', 'component_id', 'failure_mode_id',
       'severity', 'occurrence', 'detection',
       'q1', 'q2', 'q3', 'q4', 'q5',
-      'recommended_strategy', 'failure_cause', 'mitigations', 'frequency',
+      'recommended_strategy', 'failure_cause', 'mitigation_actions', 'recommended_frequency',
       'analyzed_by', 'notes', 'created_at', 'updated_at'
     ]);
   }
@@ -1139,7 +1301,8 @@ const componentTypeSchema = {
     name: { type: 'string' },
     description: { type: 'string' },
     is_active: { type: 'boolean' },
-    created_at: { type: 'string' }
+    created_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
   },
   required: ['id', 'name']
 };
@@ -1154,7 +1317,8 @@ const assetComponentSchema = {
     component_type_id: { type: 'string', maxLength: 50 },
     serial_number: { type: 'string' },
     position_reference: { type: 'string' },
-    created_at: { type: 'string' }
+    created_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
   },
   required: ['id', 'asset_id', 'component_type_id']
 };
@@ -1173,7 +1337,8 @@ const failureModeCatalogSchema = {
     default_occurrence: { type: 'number' },
     default_detection: { type: 'number' },
     is_active: { type: 'boolean' },
-    created_at: { type: 'string' }
+    created_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
   },
   required: ['id', 'component_type_id', 'mode_code', 'mode_name']
 };
@@ -1198,8 +1363,8 @@ const fmeaAnalysisSchema = {
     q5: { type: 'boolean' },
     recommended_strategy: { type: 'string' },
     failure_cause: { type: 'string' },
-    mitigations: { type: 'string' },
-    frequency: { type: 'string' },
+    mitigation_actions: { type: 'string' },
+    recommended_frequency: { type: 'string' },
     analyzed_by: { type: 'string', maxLength: 50 },
     notes: { type: 'string' },
     created_at: { type: 'string' },

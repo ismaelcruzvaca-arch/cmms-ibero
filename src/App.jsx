@@ -1,15 +1,17 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
-  Box, AppBar, Toolbar, Typography, Paper, Grid, Snackbar, Alert, Tabs, Tab
+  Box, AppBar, Toolbar, Typography, Paper, Grid, Snackbar, Alert, Tabs, Tab, Badge
 } from '@mui/material';
 import AssetTree from './components/AssetTree';
 import { NavSyncIndicator } from './components/SyncStatusIndicator';
 import { useWorkOrders } from './hooks/useWorkOrders';
-import { useAssets } from './lib/rxdb';
+import { useAssets, useRxDB } from './lib/rxdb';
 import { AssetSearchBar } from './components/AssetSearchBar';
 import { AssetDetailsPanel } from './components/AssetDetailsPanel';
 import QRScannerModal from './components/QRScannerModal';
 import MechanicDashboard from './pages/MechanicDashboard.jsx';
+import PlannerBandeja from './components/fmea/PlannerBandeja.jsx';
+import { supabase } from './lib/supabaseClient';
 import './App.css';
 
 function App() {
@@ -18,6 +20,77 @@ function App() {
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
+
+  // ─── Auth / Rol ─────────────────────────────────────────────────────
+  const [userRole, setUserRole] = useState(null);
+  const [pendingCount, setPendingCount] = useState(0);
+  const { db } = useRxDB();
+
+  // Obtener rol del usuario desde user_profiles
+  useEffect(() => {
+    let cancelled = false;
+
+    const getRole = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          const { data } = await supabase
+            .from('user_profiles')
+            .select('role')
+            .eq('id', session.user.id)
+            .single();
+          if (!cancelled && data?.role) {
+            setUserRole(data.role);
+          }
+        }
+      } catch (err) {
+        console.warn('[App] Error obteniendo rol:', err);
+      }
+    };
+
+    getRole();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Suscripción reactiva al contador de análisis pendientes
+  useEffect(() => {
+    if (!db) return;
+
+    const sub = db.fmea_rcm_analysis.find({
+      selector: { _deleted: false }
+    }).$.subscribe({
+      next: (docs) => {
+        try {
+          const pending = docs.filter((d) => !d.get('recommended_strategy'));
+          setPendingCount(pending.length);
+        } catch (e) {
+          // ignorar
+        }
+      },
+      error: () => {
+        // ignorar — el badge se queda en 0
+      }
+    });
+
+    return () => sub.unsubscribe();
+  }, [db]);
+
+  // Escuchar evento personalizado de PlannerBandeja para ir a un activo
+  useEffect(() => {
+    const handler = (e) => {
+      const { assetId } = e.detail;
+      if (assetId) {
+        setActiveTab(1); // Ir a la pestaña Activos
+        const found = assets.find((a) => a.id === assetId);
+        if (found) {
+          setSelectedAsset(found);
+          setDrawerOpen(true);
+        }
+      }
+    };
+    window.addEventListener('fmea:select-asset', handler);
+    return () => window.removeEventListener('fmea:select-asset', handler);
+  }, [assets]);
 
   // ─── Escáner QR ────────────────────────────────────────────────────
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -95,7 +168,7 @@ function App() {
           <AssetSearchBar onSelectAsset={handleSelectAsset} onOpenScanner={handleOpenScanner} />
         </Box>
 
-        {/* Tabs: Órdenes de Trabajo / Activos */}
+        {/* Tabs: Órdenes de Trabajo / Activos / Bandeja */}
         <Tabs
           value={activeTab}
           onChange={(e, v) => setActiveTab(v)}
@@ -103,13 +176,27 @@ function App() {
         >
           <Tab label="Órdenes de Trabajo" />
           <Tab label="Activos" />
+          {(userRole === 'PLANNER' || userRole === 'ADMIN') && (
+            <Tab
+              label={
+                <Badge
+                  badgeContent={pendingCount}
+                  color="error"
+                  invisible={pendingCount === 0}
+                  sx={{ '& .MuiBadge-badge': { fontSize: 10, height: 18, minWidth: 18 } }}
+                >
+                  Bandeja FMEA
+                </Badge>
+              }
+            />
+          )}
         </Tabs>
 
         {activeTab === 0 ? (
           <Paper variant="outlined" sx={{ p: 3 }}>
             <MechanicDashboard />
           </Paper>
-        ) : (
+        ) : activeTab === 1 ? (
           <Grid container spacing={3} alignItems="flex-start">
 
             {/* Columna principal: Árbol de activos */}
@@ -149,6 +236,18 @@ function App() {
               </Paper>
             </Grid>
 
+          </Grid>
+        ) : activeTab === 2 && (userRole === 'PLANNER' || userRole === 'ADMIN') ? (
+          <Paper variant="outlined" sx={{ p: 3 }}>
+            <PlannerBandeja />
+          </Paper>
+        ) : (
+          <Grid container spacing={3} alignItems="flex-start">
+            <Grid size={{ xs: 12, md: 8, lg: 9 }}>
+              <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+                <AssetTree onSelectAsset={handleSelectAsset} />
+              </Paper>
+            </Grid>
           </Grid>
         )}
       </Box>
