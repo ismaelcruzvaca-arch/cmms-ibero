@@ -292,7 +292,19 @@ async function _createDatabase() {
       },
       assets: { schema: assetSchema },
       asset_hierarchy: { schema: assetHierarchySchema },
-      material_requests: { schema: materialRequestSchema }
+      material_requests: { schema: materialRequestSchema },
+      labor_records: { schema: laborRecordSchema },
+      // ── Checklist Collections ──
+      causa_falla_catalog: { schema: causaFallaSchema },
+      checklist_templates: { schema: checklistTemplateSchema },
+      checklist_instances: { schema: checklistInstanceSchema },
+      checklist_item_responses: { schema: checklistItemResponseSchema },
+      checklist_sampling_config: { schema: checklistSamplingConfigSchema },
+      // ── FMEA / RCM Collections ──
+      component_types: { schema: componentTypeSchema },
+      asset_components: { schema: assetComponentSchema },
+      failure_mode_catalog: { schema: failureModeCatalogSchema },
+      fmea_rcm_analysis: { schema: fmeaAnalysisSchema }
     });
   } catch (err) {
     const errorStr = String(err);
@@ -311,7 +323,17 @@ async function _createDatabase() {
         },
         assets: { schema: assetSchema },
         asset_hierarchy: { schema: assetHierarchySchema },
-        material_requests: { schema: materialRequestSchema }
+        material_requests: { schema: materialRequestSchema },
+        labor_records: { schema: laborRecordSchema },
+        causa_falla_catalog: { schema: causaFallaSchema },
+        checklist_templates: { schema: checklistTemplateSchema },
+        checklist_instances: { schema: checklistInstanceSchema },
+        checklist_item_responses: { schema: checklistItemResponseSchema },
+        checklist_sampling_config: { schema: checklistSamplingConfigSchema },
+        component_types: { schema: componentTypeSchema },
+        asset_components: { schema: assetComponentSchema },
+        failure_mode_catalog: { schema: failureModeCatalogSchema },
+        fmea_rcm_analysis: { schema: fmeaAnalysisSchema }
       });
       newDb.work_orders.preSave((plainData, doc) => {
         const oldPhase = doc.lifecycle_phase;
@@ -648,6 +670,129 @@ export async function startAllReplications(db) {
     push: { handler: mrPush }
   });
 
+  // Labor Records (custom pull: technician_id filter)
+  const laborPull = createLaborPullHandler('labor_records', 'updated_at');
+  const laborPush = createLaborPushHandler('labor_records');
+
+  replicationStates.labor_records = replicateRxCollection({
+    collection: db.labor_records,
+    replicationIdentifier: 'cmms-lr-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: laborPull },
+    push: { handler: laborPush }
+  });
+
+  // ── Checklist Replications ──
+  // causa_falla_catalog (pull-only — catálogo fijo)
+  replicationStates.causa_falla_catalog = replicateRxCollection({
+    collection: db.causa_falla_catalog,
+    replicationIdentifier: 'cmms-cfc-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('causa_falla_catalog', 'id') },
+    push: { handler: createPushHandler('causa_falla_catalog', ['id', 'code', 'name', 'description']) }
+  });
+
+  // checklist_templates (pull-only — leídos del servidor)
+  replicationStates.checklist_templates = replicateRxCollection({
+    collection: db.checklist_templates,
+    replicationIdentifier: 'cmms-ct-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('checklist_templates', 'updated_at') },
+    push: { handler: createPushHandler('checklist_templates', [
+      'id', 'code', 'description', 'module_id', 'job_plan_id', 'block_type',
+      'sampling_rate', 'is_auditable', 'is_active', 'created_at', 'updated_at'
+    ]) }
+  });
+
+  // checklist_instances (pull + push — creadas localmente, sincronizadas)
+  replicationStates.checklist_instances = replicateRxCollection({
+    collection: db.checklist_instances,
+    replicationIdentifier: 'cmms-ci-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('checklist_instances', 'created_at') },
+    push: { handler: createPushHandler('checklist_instances', [
+      'id', 'work_order_id', 'checklist_template_id', 'technician_id', 'asset_id',
+      'evaluator_source', 'evaluated_by', 'verified_by', 'verified_at',
+      'status', 'started_at', 'completed_at', 'notes', 'created_at'
+    ]) }
+  });
+
+  // checklist_item_responses (pull + push)
+  replicationStates.checklist_item_responses = replicateRxCollection({
+    collection: db.checklist_item_responses,
+    replicationIdentifier: 'cmms-cir-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('checklist_item_responses', 'answered_at') },
+    push: { handler: createPushHandler('checklist_item_responses', [
+      'id', 'checklist_instance_id', 'template_item_id', 'status',
+      'causa_falla_id', 'comment', 'photo_url', 'measurement_value', 'answered_at'
+    ]) }
+  });
+
+  // checklist_sampling_config (pull-only — leídos del servidor)
+  replicationStates.checklist_sampling_config = replicateRxCollection({
+    collection: db.checklist_sampling_config,
+    replicationIdentifier: 'cmms-csc-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('checklist_sampling_config', 'id') },
+    push: { handler: createPushHandler('checklist_sampling_config', [
+      'id', 'module_id', 'job_plan_id', 'block_type',
+      'default_sampling_rate', 'is_auditable_only', 'is_active'
+    ]) }
+  });
+  // ── FMEA / RCM Replications ──
+  // component_types (pull-only — catálogo fijo)
+  replicationStates.component_types = replicateRxCollection({
+    collection: db.component_types,
+    replicationIdentifier: 'cmms-ctypes-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('component_types', 'id') }
+  });
+
+  // asset_components (pull-only — catálogo filtrado por asset_id)
+  replicationStates.asset_components = replicateRxCollection({
+    collection: db.asset_components,
+    replicationIdentifier: 'cmms-acomp-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('asset_components', 'id') }
+  });
+
+  // failure_mode_catalog (pull-only — catálogo filtrado por component_type_id)
+  replicationStates.failure_mode_catalog = replicateRxCollection({
+    collection: db.failure_mode_catalog,
+    replicationIdentifier: 'cmms-fmc-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('failure_mode_catalog', 'id') }
+  });
+
+  // fmea_rcm_analysis (pull + push — datos de usuario)
+  const fmeaPull = createPullHandler('fmea_rcm_analysis', 'updated_at');
+  const fmeaPush = createPushHandler('fmea_rcm_analysis', [
+    'id', 'asset_id', 'component_id', 'failure_mode_id',
+    'severity', 'occurrence', 'detection',
+    'q1', 'q2', 'q3', 'q4', 'q5',
+    'recommended_strategy', 'failure_cause', 'mitigations', 'frequency',
+    'analyzed_by', 'notes', 'created_at', 'updated_at'
+  ]);
+
+  replicationStates.fmea_rcm_analysis = replicateRxCollection({
+    collection: db.fmea_rcm_analysis,
+    replicationIdentifier: 'cmms-fmea-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: fmeaPull },
+    push: { handler: fmeaPush }
+  });
+
   // Suscripciones a estados
   Object.entries(replicationStates).forEach(([key, state]) => {
     state.active$.subscribe(isActive => {
@@ -665,6 +810,11 @@ export async function startAllReplications(db) {
 function getPullOrderField(collectionName) {
   if (collectionName === 'assets') return 'updated_at_ms';
   if (collectionName === 'asset_hierarchy') return 'id';
+  if (collectionName === 'labor_records') return 'updated_at';
+  if (collectionName === 'component_types') return 'id';
+  if (collectionName === 'asset_components') return 'id';
+  if (collectionName === 'failure_mode_catalog') return 'id';
+  if (collectionName === 'fmea_rcm_analysis') return 'updated_at';
   return 'updated_at';
 }
 
@@ -681,6 +831,16 @@ function getPushHandler(collectionName) {
   if (collectionName === 'asset_hierarchy') {
     return createPushHandler(collectionName, [
       'id', 'parent_id', 'child_id', 'hierarchy_level', 'created_at'
+    ]);
+  }
+  if (collectionName === 'labor_records') return createLaborPushHandler(collectionName);
+  if (collectionName === 'fmea_rcm_analysis') {
+    return createPushHandler(collectionName, [
+      'id', 'asset_id', 'component_id', 'failure_mode_id',
+      'severity', 'occurrence', 'detection',
+      'q1', 'q2', 'q3', 'q4', 'q5',
+      'recommended_strategy', 'failure_cause', 'mitigations', 'frequency',
+      'analyzed_by', 'notes', 'created_at', 'updated_at'
     ]);
   }
   return createPushHandler(collectionName, []);
@@ -870,4 +1030,186 @@ export function useAssets() {
   return { assets, hierarchy, assetTree, loading, error, syncStatus, refreshAssets };
 }
 
-export { workOrderSchema, assetSchema, assetHierarchySchema, materialRequestSchema };
+// ============================================
+// CHECKLIST SCHEMAS
+// ============================================
+
+const causaFallaSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    code: { type: 'string', maxLength: 30 },
+    name: { type: 'string' },
+    description: { type: 'string' }
+  },
+  required: ['id', 'code', 'name']
+};
+
+const checklistTemplateSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    code: { type: 'string', maxLength: 50 },
+    description: { type: 'string' },
+    module_id: { type: 'string', maxLength: 50 },
+    job_plan_id: { type: 'string', maxLength: 50 },
+    block_type: { type: 'string', enum: ['A', 'B', 'C'] },
+    sampling_rate: { type: 'number' },
+    is_auditable: { type: 'boolean' },
+    is_active: { type: 'boolean' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'number' }
+  },
+  required: ['id', 'code', 'description', 'module_id', 'block_type']
+};
+
+const checklistInstanceSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    work_order_id: { type: 'string', maxLength: 50 },
+    checklist_template_id: { type: 'string', maxLength: 50 },
+    technician_id: { type: 'string', maxLength: 50 },
+    asset_id: { type: 'string', maxLength: 100 },
+    evaluator_source: { type: 'string', enum: ['SELF', 'SUPERVISOR', 'PEER'] },
+    evaluated_by: { type: 'string', maxLength: 50 },
+    verified_by: { type: 'string', maxLength: 50 },
+    verified_at: { type: 'string' },
+    status: { type: 'string', enum: ['IN_PROGRESS', 'COMPLETED', 'VOID'] },
+    started_at: { type: 'string' },
+    completed_at: { type: 'string' },
+    notes: { type: 'string' },
+    created_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'work_order_id', 'checklist_template_id', 'technician_id', 'asset_id', 'status']
+};
+
+const checklistItemResponseSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    checklist_instance_id: { type: 'string', maxLength: 50 },
+    template_item_id: { type: 'string', maxLength: 50 },
+    status: { type: 'string', enum: ['PASS', 'FAIL', 'NA', 'SKIPPED'] },
+    causa_falla_id: { type: 'string', maxLength: 50 },
+    comment: { type: 'string' },
+    photo_url: { type: 'string' },
+    measurement_value: { type: 'number' },
+    answered_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'checklist_instance_id', 'template_item_id', 'status']
+};
+
+const checklistSamplingConfigSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    module_id: { type: 'string', maxLength: 50 },
+    job_plan_id: { type: 'string', maxLength: 50 },
+    block_type: { type: 'string', enum: ['A', 'B', 'C'] },
+    default_sampling_rate: { type: 'number' },
+    is_auditable_only: { type: 'boolean' },
+    is_active: { type: 'boolean' }
+  },
+  required: ['id', 'block_type']
+};
+
+// ============================================
+// FMEA / RCM SCHEMAS
+// ============================================
+
+const componentTypeSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    name: { type: 'string' },
+    description: { type: 'string' },
+    is_active: { type: 'boolean' },
+    created_at: { type: 'string' }
+  },
+  required: ['id', 'name']
+};
+
+const assetComponentSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    asset_id: { type: 'string', maxLength: 50 },
+    component_type_id: { type: 'string', maxLength: 50 },
+    serial_number: { type: 'string' },
+    position_reference: { type: 'string' },
+    created_at: { type: 'string' }
+  },
+  required: ['id', 'asset_id', 'component_type_id']
+};
+
+const failureModeCatalogSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    component_type_id: { type: 'string', maxLength: 50 },
+    mode_code: { type: 'string', maxLength: 50 },
+    mode_name: { type: 'string' },
+    description: { type: 'string' },
+    default_severity: { type: 'number' },
+    default_occurrence: { type: 'number' },
+    default_detection: { type: 'number' },
+    is_active: { type: 'boolean' },
+    created_at: { type: 'string' }
+  },
+  required: ['id', 'component_type_id', 'mode_code', 'mode_name']
+};
+
+const fmeaAnalysisSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    asset_id: { type: 'string', maxLength: 50 },
+    component_id: { type: 'string', maxLength: 50 },
+    failure_mode_id: { type: 'string', maxLength: 50 },
+    severity: { type: 'number', minimum: 1, maximum: 10 },
+    occurrence: { type: 'number', minimum: 1, maximum: 10 },
+    detection: { type: 'number', minimum: 1, maximum: 10 },
+    rpn: { type: 'number', minimum: 1, maximum: 1000 },
+    q1: { type: 'boolean' },
+    q2: { type: 'boolean' },
+    q3: { type: 'boolean' },
+    q4: { type: 'boolean' },
+    q5: { type: 'boolean' },
+    recommended_strategy: { type: 'string' },
+    failure_cause: { type: 'string' },
+    mitigations: { type: 'string' },
+    frequency: { type: 'string' },
+    analyzed_by: { type: 'string', maxLength: 50 },
+    notes: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'number' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'asset_id', 'component_id', 'failure_mode_id', 'severity', 'occurrence', 'detection']
+};
+
+export { workOrderSchema, assetSchema, assetHierarchySchema, materialRequestSchema, laborRecordSchema,
+         causaFallaSchema, checklistTemplateSchema, checklistInstanceSchema,
+         checklistItemResponseSchema, checklistSamplingConfigSchema,
+         componentTypeSchema, assetComponentSchema, failureModeCatalogSchema, fmeaAnalysisSchema };
