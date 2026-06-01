@@ -108,17 +108,31 @@ export const DETECTION_STANDARD = [
 // ──────────────────────────────────────────────
 
 /**
- * Preguntas del árbol de decisión RCM.
- * Aplican en los 3 niveles del wizard.
+ * Preguntas del árbol de decisión RCM — Nivel Rápido (lenguaje taller).
  * @type {Array<{id: string, label: string, shortLabel: string}>}
  */
-export const RCM_QUESTIONS = [
+export const RCM_QUESTIONS_QUICK = [
   { id: 'q1', label: '¿La falla es evidente para el operador?', shortLabel: '¿Es evidente?' },
   { id: 'q2', label: '¿Afecta seguridad o medio ambiente?', shortLabel: '¿Afecta seguridad?' },
-  { id: 'q3', label: '¿Se puede reducir la frecuencia de falla?', shortLabel: '¿Se puede reducir?' },
-  { id: 'q4', label: '¿Existe una tarea de mantenimiento efectiva?', shortLabel: '¿Hay tarea PM?' },
-  { id: 'q5', label: '¿Hay un indicador de condición detectable?', shortLabel: '¿Hay indicador?' },
+  { id: 'q3', label: '¿Se puede detectar con inspección sensorial?', shortLabel: '¿Inspección sensorial?' },
+  { id: 'q4', label: '¿El componente es crítico para producción?', shortLabel: '¿Crítico producción?' },
+  { id: 'q5', label: '¿Existe una tarea de mantenimiento efectiva?', shortLabel: '¿Tarea efectiva?' },
 ];
+
+/**
+ * Preguntas del árbol de decisión RCM — Nivel Experto/Ingeniería (estándar confiabilidad).
+ * @type {Array<{id: string, label: string, shortLabel: string}>}
+ */
+export const RCM_QUESTIONS_EXPERT = [
+  { id: 'q1', label: '¿La falla es evidente para el operador durante sus tareas normales?', shortLabel: '¿Evidente operador?' },
+  { id: 'q2', label: '¿La falla tiene un efecto adverso directo en seguridad o medio ambiente?', shortLabel: '¿Afecta seguridad?' },
+  { id: 'q3', label: '¿La falla se puede detectar mediante inspección sensorial (visual, sonido, vibración)?', shortLabel: '¿Detección sensorial?' },
+  { id: 'q4', label: '¿El componente es crítico para la producción (la falla detiene el proceso)?', shortLabel: '¿Crítico producción?' },
+  { id: 'q5', label: '¿Existe una tarea de mantenimiento efectiva que prevenga o mitigue la falla?', shortLabel: '¿Tarea efectiva?' },
+];
+
+/** Alias: RCM_QUESTIONS apunta a Expert por defecto (backward compat) */
+export const RCM_QUESTIONS = RCM_QUESTIONS_EXPERT;
 
 /**
  * Estrategias RCM con etiqueta, descripción y color.
@@ -282,4 +296,32 @@ export function getSeverityColor(value) {
 export function getAPColor(ap) {
   const entry = ACTION_PRIORITY[ap];
   return entry ? entry.color : '#9e9e9e';
+}
+
+/**
+ * Determina la estrategia RCM según el árbol de decisión definido en RCM_DECISION_TREE.
+ *
+ * Evalúa las respuestas q1–q5 contra cada rama del árbol.
+ * La primera rama que coincida determina la estrategia.
+ *
+ * @param {{ q1?: boolean, q2?: boolean, q3?: boolean, q4?: boolean, q5?: boolean }} values
+ *   Respuestas a las 5 preguntas RCM. Cada valor puede ser true, false, o null/undefined (sin responder).
+ * @returns {string} Clave de la estrategia determinada: 'BCM', 'PM', 'RTF', o 'REDESIGN'
+ */
+export function fn_determine_rcm_strategy(values) {
+  const { q1, q2, q3, q4, q5 } = values;
+
+  for (const branch of RCM_DECISION_TREE.branches) {
+    if (
+      (branch.q1 === undefined || branch.q1 === q1) &&
+      (branch.q2 === undefined || branch.q2 === q2) &&
+      (branch.q3 === undefined || branch.q3 === q3) &&
+      (branch.q4 === undefined || branch.q4 === q4) &&
+      (branch.q5 === undefined || branch.q5 === q5)
+    ) {
+      return branch.strategy;
+    }
+  }
+
+  return 'RTF';
 }

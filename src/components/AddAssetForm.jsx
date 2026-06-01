@@ -9,9 +9,10 @@ import React, { useState, useEffect } from 'react';
 import {
   Box, TextField, Button, Typography, MenuItem,
   Select, FormControl, InputLabel, FormHelperText,
-  CircularProgress, Alert, Snackbar, Divider
+  CircularProgress, Alert, Snackbar, Divider, Switch, FormControlLabel, Collapse
 } from '@mui/material';
 import { useRxDB } from '../lib/rxdb';
+import FmeaWizard from './fmea/FmeaWizard';
 
 // ─── Tipos de equipo y sus campos dinámicos ────────────────────────────
 const ASSET_TYPES = {
@@ -76,6 +77,10 @@ export default function AddAssetForm({ onSuccess }) {
   const [tagChecking, setTagChecking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+
+  // ─── Estado para FMEA ────────────────────────────────────────────────
+  const [savedAssetId, setSavedAssetId] = useState(null);
+  const [fmeaEnabled, setFmeaEnabled] = useState(false);
 
   // ─── Cargar assets existentes para el selector parent_id ────────────
   useEffect(() => {
@@ -209,6 +214,7 @@ export default function AddAssetForm({ onSuccess }) {
         console.warn('[AddAssetForm] Upsert equipment_ids falló (la replicación lo hará):', upsertErr.message);
       }
 
+      setSavedAssetId(doc.id);
       setSnackbar({ open: true, message: `Activo "${doc.equipment_id}" creado exitosamente`, severity: 'success' });
       setForm(INITIAL_FORM);
       setSpecs(INITIAL_SPECS);
@@ -390,6 +396,35 @@ export default function AddAssetForm({ onSuccess }) {
           </>
         )}
 
+        {/* ─── Sección FMEA ──────────────────────────────────────────── */}
+        <Divider sx={{ my: 2 }}>
+          <Typography variant="caption" color="text.secondary">
+            Análisis de Fallas
+          </Typography>
+        </Divider>
+
+        <FormControlLabel
+          control={
+            <Switch
+              checked={fmeaEnabled}
+              onChange={(e) => setFmeaEnabled(e.target.checked)}
+              disabled={submitting}
+            />
+          }
+          label="¿Realizar análisis FMEA?"
+          sx={{ mb: 2 }}
+        />
+
+        <Collapse in={fmeaEnabled} timeout="auto" unmountOnExit>
+          {savedAssetId ? (
+            <FmeaWizard assetId={savedAssetId} />
+          ) : (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Guardá el activo primero para iniciar el análisis FMEA.
+            </Alert>
+          )}
+        </Collapse>
+
         {/* ─── Acciones ─────────────────────────────────────────────── */}
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 3 }}>
           <Button
@@ -398,6 +433,8 @@ export default function AddAssetForm({ onSuccess }) {
               setForm(INITIAL_FORM);
               setSpecs(INITIAL_SPECS);
               setTagError('');
+              setSavedAssetId(null);
+              setFmeaEnabled(false);
             }}
             disabled={submitting}
           >
