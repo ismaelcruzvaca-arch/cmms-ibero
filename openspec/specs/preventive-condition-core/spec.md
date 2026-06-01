@@ -1,8 +1,8 @@
-# Preventive & Condition-Based Maintenance — Core Schema Specification
+# Preventive & Condition-Based Maintenance — Core Schema & CBM Automation
 
 ## Purpose
 
-Database foundation for PM/CBM module. Defines job plan templates, scheduling rules (time/meter-driven), and asset condition monitoring via meters with threshold-based alerting. Schema-only — no triggers, functions, or application logic.
+Database foundation and automation layer for PM/CBM module. Defines job plan templates, scheduling rules (time/meter-driven), asset condition monitoring via meters with threshold-based alerting, and CBM alert trigger that evaluates meter readings against thresholds and conditionally generates work orders.
 
 ## Requirements
 
@@ -193,6 +193,43 @@ The system MUST create a `meter_readings` table:
 - WHEN querying ordered by reading_date DESC
 - THEN the full reading history is returned with the most recent first
 
+#### Scenario: Warning reading flagged
+
+- GIVEN a measure_point with upper_limit_warning = 100
+- WHEN inserting a reading with value = 105
+- THEN `is_alert_triggered` = true
+- AND NO work order is created
+
+#### Scenario: Critical reading creates work order
+
+- GIVEN a measure_point with upper_limit_critical = 120
+- WHEN inserting a reading with value = 130
+- THEN `is_alert_triggered` = true
+- AND a work order is created with `wo_type = 'CBM'`
+- AND the work order has `lifecycle_phase = 'WAPPR'`
+
+#### Scenario: Anti-spam suppresses duplicate alerts
+
+- GIVEN an existing CBM work order for asset A1 + meter M1 in WAPPR status
+- WHEN inserting a new critical reading for A1 + M1
+- THEN the reading is flagged `is_alert_triggered = true`
+- BUT no new work order is created
+- AND the existing work order is reused
+
+#### Scenario: Normal reading below all thresholds
+
+- GIVEN a measure_point with warning = 100, critical = 120
+- WHEN inserting a reading with value = 50
+- THEN `is_alert_triggered` remains FALSE
+- AND no work order is created
+
+#### Scenario: Lower limit critical
+
+- GIVEN a measure_point with lower_limit_critical = 10
+- WHEN inserting a reading with value = 5
+- THEN `is_alert_triggered` = true
+- AND a work order is created with `symptom_note` describing the low-limit breach
+
 ### Requirement: RLS Access Control
 
 The system MUST enable RLS on all 7 tables. ADMIN and PLANNER SHALL have full read/write on all tables. TECHNICIAN SHALL have SELECT on all tables and INSERT only on `meter_readings`.
@@ -215,12 +252,27 @@ The system MUST enable RLS on all 7 tables. ADMIN and PLANNER SHALL have full re
 - WHEN attempting to INSERT into job_plans
 - THEN the RLS policy rejects the operation
 
+### Requirement: `meter_id` on work_orders (CBM)
+
+The system MUST add a `meter_id` column to `work_orders` for tracing which sensor triggered a condition-based work order.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| meter_id | UUID | FK → meters(id), nullable, only set for CBM work orders |
+
+#### Scenario: CBM work order links to meter
+
+- GIVEN a meter reading exceeds a critical limit
+- WHEN the trigger creates a work order
+- THEN `work_orders.meter_id` = the meter that triggered the alert
+
 ## Non-Functional Requirements
 
 - **Idempotency**: All CREATE TABLE statements MUST use IF NOT EXISTS for safe re-runs
 - **FK integrity**: All foreign keys MUST be strict (no ON DELETE SET NULL) except as noted
 - **Constraint enforcement**: CHECK constraints MUST reject invalid values at database level
-- **No triggers/functions**: Business logic is deferred to Phase 2
+- **CBM automation**: Business logic is implemented via `BEFORE INSERT FOR EACH ROW` trigger on `meter_readings` with `SECURITY DEFINER SET search_path = public`
+- **Anti-spam**: Critical threshold alerts MUST deduplicate by `asset_id + meter_id` while an open CBM work order exists (`lifecycle_phase IN ('WAPPR', 'APPROVED', 'INPRG')`)
 
 ## Acceptance Criteria
 
@@ -231,3 +283,9 @@ The system MUST enable RLS on all 7 tables. ADMIN and PLANNER SHALL have full re
 - [ ] UNIQUE(job_plan_id, step_sequence) enforced on job_plan_tasks
 - [ ] RLS enabled on all 7 tables — ADMIN/PLANNER full r/w, TECHNICIAN restricted
 - [ ] Migration idempotent — safe to run repeatedly
+- [ ] `work_orders.meter_id` column added (nullable FK → meters(id)) for CBM tracing
+- [ ] `trg_meter_reading_cbm` trigger installed on `meter_readings` — evaluates 4-quadrant thresholds
+- [ ] Warning threshold → `is_alert_triggered = true`, no work order created
+- [ ] Critical threshold → work order generated with `wo_type = 'CBM'`, `lifecycle_phase = 'WAPPR'`
+- [ ] Anti-spam deduplication: same asset + meter with open WO suppresses duplicate
+- [ ] CBM trigger tested on production — 4/4 pgTAP tests passing

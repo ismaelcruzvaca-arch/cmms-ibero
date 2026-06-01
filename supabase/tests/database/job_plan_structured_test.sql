@@ -1,11 +1,11 @@
 -- =============================================================================
 -- Job Plan Structured — Test Suite (pgTAP)
--- Test cases: Schema (14), RLS (4), PM→WO Extension (6) = 24 total
+-- Test cases: Schema (14), RLS (11), PM→WO Extension (6) = 31 total
 -- =============================================================================
 
 BEGIN;
 
-SELECT plan(24);
+SELECT plan(31);
 
 -- System user for auto-generated checklist_instances
 INSERT INTO auth.users (id, email, encrypted_password, created_at, updated_at)
@@ -131,7 +131,139 @@ SELECT policies_are('work_order_safety_requirements',ARRAY['wosr_select','wosr_i
   'Test 18 — work_order_safety_requirements has 4 RLS policies');
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- T3 — PM→WO EXTENSION TESTS (tests 19-24)
+-- T2b — RLS BEHAVIORAL TESTS (tests 19-25)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- auth.uid() se setea via "request.jwt.claim.sub".
+-- RLS solo aplica para rol "authenticated".
+-- job_plan_labor es representativa — las 4 tablas comparten las mismas RLS.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Test 19: TECHNICIAN can SELECT job_plan_labor
+SAVEPOINT rls_jpl_tech_select;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" TO '00000000-0000-0000-0000-000000000501'; -- TECHNICIAN
+
+SELECT is(
+  (SELECT COUNT(*)::int FROM job_plan_labor
+    WHERE job_plan_id = '00000000-0000-0000-0000-000000000511'),
+  2,
+  'Test 19 — TECHNICIAN can SELECT job_plan_labor'
+);
+
+RESET ROLE;
+ROLLBACK TO SAVEPOINT rls_jpl_tech_select;
+
+-- Test 20: TECHNICIAN cannot INSERT job_plan_labor
+SAVEPOINT rls_jpl_tech_insert;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" TO '00000000-0000-0000-0000-000000000501'; -- TECHNICIAN
+
+SELECT throws_ok(
+  $$ INSERT INTO job_plan_labor (id, job_plan_id, trade, estimated_hours, head_count, hourly_rate)
+     VALUES (
+       '00000000-0000-0000-0000-000000000701',
+       '00000000-0000-0000-0000-000000000511',
+       'WELDER', 3, 1, 28.00
+     ) $$,
+  '23514',
+  NULL,
+  'Test 20 — TECHNICIAN cannot INSERT job_plan_labor (RLS)'
+);
+
+RESET ROLE;
+ROLLBACK TO SAVEPOINT rls_jpl_tech_insert;
+
+-- Test 21: TECHNICIAN cannot UPDATE job_plan_labor
+SAVEPOINT rls_jpl_tech_update;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" TO '00000000-0000-0000-0000-000000000501'; -- TECHNICIAN
+
+UPDATE job_plan_labor SET estimated_hours = 99 WHERE id = '00000000-0000-0000-0000-000000000601';
+
+SELECT is(
+  (SELECT estimated_hours FROM job_plan_labor WHERE id = '00000000-0000-0000-0000-000000000601'),
+  2,
+  'Test 21 — TECHNICIAN cannot UPDATE job_plan_labor (hours unchanged)'
+);
+
+RESET ROLE;
+ROLLBACK TO SAVEPOINT rls_jpl_tech_update;
+
+-- Test 22: TECHNICIAN cannot DELETE job_plan_labor
+SAVEPOINT rls_jpl_tech_delete;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" TO '00000000-0000-0000-0000-000000000501'; -- TECHNICIAN
+
+DELETE FROM job_plan_labor WHERE id = '00000000-0000-0000-0000-000000000601';
+
+SELECT is(
+  (SELECT COUNT(*)::int FROM job_plan_labor WHERE id = '00000000-0000-0000-0000-000000000601'),
+  1,
+  'Test 22 — TECHNICIAN cannot DELETE job_plan_labor (row still exists)'
+);
+
+RESET ROLE;
+ROLLBACK TO SAVEPOINT rls_jpl_tech_delete;
+
+-- Test 23: PLANNER can INSERT job_plan_labor
+SAVEPOINT rls_jpl_planner_insert;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" TO '00000000-0000-0000-0000-000000000502'; -- PLANNER
+
+SELECT lives_ok(
+  $$ INSERT INTO job_plan_labor (id, job_plan_id, trade, estimated_hours, head_count, hourly_rate)
+     VALUES (
+       '00000000-0000-0000-0000-000000000702',
+       '00000000-0000-0000-0000-000000000511',
+       'WELDER', 3, 1, 28.00
+     ) $$,
+  'Test 23 — PLANNER can INSERT job_plan_labor'
+);
+
+RESET ROLE;
+ROLLBACK TO SAVEPOINT rls_jpl_planner_insert;
+
+-- Test 24: PLANNER cannot DELETE job_plan_labor
+SAVEPOINT rls_jpl_planner_delete;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" TO '00000000-0000-0000-0000-000000000502'; -- PLANNER
+
+DELETE FROM job_plan_labor WHERE id = '00000000-0000-0000-0000-000000000601';
+
+SELECT is(
+  (SELECT COUNT(*)::int FROM job_plan_labor WHERE id = '00000000-0000-0000-0000-000000000601'),
+  1,
+  'Test 24 — PLANNER cannot DELETE job_plan_labor (row still exists)'
+);
+
+RESET ROLE;
+ROLLBACK TO SAVEPOINT rls_jpl_planner_delete;
+
+-- Test 25: ADMIN can DELETE job_plan_labor
+SAVEPOINT rls_jpl_admin_delete;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" TO '00000000-0000-0000-0000-000000000503'; -- ADMIN
+
+DELETE FROM job_plan_labor WHERE id = '00000000-0000-0000-0000-000000000601';
+
+SELECT is(
+  (SELECT COUNT(*)::int FROM job_plan_labor WHERE id = '00000000-0000-0000-0000-000000000601'),
+  0,
+  'Test 25 — ADMIN can DELETE job_plan_labor (row deleted)'
+);
+
+RESET ROLE;
+ROLLBACK TO SAVEPOINT rls_jpl_admin_delete;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- T3 — PM→WO EXTENSION TESTS (tests 26-31)
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Setup: add labor + safety to the job_plan
@@ -145,21 +277,21 @@ VALUES
   ('00000000-0000-0000-0000-000000000611', '00000000-0000-0000-0000-000000000511', 'LOTO', 'LOTO on pump isolation', true),
   ('00000000-0000-0000-0000-000000000612', '00000000-0000-0000-0000-000000000511', 'PTW', 'Hot work permit required', true);
 
--- Test 19: Function exists
+-- Test 26: Function exists
 SELECT has_function('generate_due_preventive_work_orders',
-  'Test 19 — generate_due_preventive_work_orders() exists');
+  'Test 26 — generate_due_preventive_work_orders() exists');
 
--- Test 20: PM→WO generates a WO
+-- Test 27: PM→WO generates a WO
 SAVEPOINT pm_test_1;
 
 SELECT ok(
   generate_due_preventive_work_orders() >= 1,
-  'Test 20 — generate_due_preventive_work_orders creates at least 1 WO'
+  'Test 27 — generate_due_preventive_work_orders creates at least 1 WO'
 );
 
 ROLLBACK TO SAVEPOINT pm_test_1;
 
--- Test 21: Labor estimates cloned
+-- Test 28: Labor estimates cloned
 SAVEPOINT pm_test_2;
 
 SELECT generate_due_preventive_work_orders();
@@ -168,12 +300,12 @@ SELECT is(
   (SELECT COUNT(*)::int FROM work_order_labor_estimates
     WHERE job_plan_id = '00000000-0000-0000-0000-000000000511'),
   2,
-  'Test 21 — 2 labor rows cloned to work_order_labor_estimates'
+  'Test 28 — 2 labor rows cloned to work_order_labor_estimates'
 );
 
 ROLLBACK TO SAVEPOINT pm_test_2;
 
--- Test 22: Safety requirements cloned
+-- Test 29: Safety requirements cloned
 SAVEPOINT pm_test_3;
 
 SELECT generate_due_preventive_work_orders();
@@ -182,12 +314,12 @@ SELECT is(
   (SELECT COUNT(*)::int FROM work_order_safety_requirements
     WHERE job_plan_id = '00000000-0000-0000-0000-000000000511'),
   2,
-  'Test 22 — 2 safety rows cloned to work_order_safety_requirements'
+  'Test 29 — 2 safety rows cloned to work_order_safety_requirements'
 );
 
 ROLLBACK TO SAVEPOINT pm_test_3;
 
--- Test 23: Checklist instances created
+-- Test 30: Checklist instances created
 SAVEPOINT pm_test_4;
 
 SELECT generate_due_preventive_work_orders();
@@ -196,12 +328,12 @@ SELECT ok(
   EXISTS(SELECT 1 FROM checklist_instances
     WHERE status = 'PENDING'
       AND notes LIKE '%JP-TEST-PLAN%'),
-  'Test 23 — checklist_instances created with PENDING status'
+  'Test 30 — checklist_instances created with PENDING status'
 );
 
 ROLLBACK TO SAVEPOINT pm_test_4;
 
--- Test 24: Cost calculation
+-- Test 31: Cost calculation
 SAVEPOINT pm_test_5;
 
 SELECT generate_due_preventive_work_orders();
@@ -211,7 +343,7 @@ SELECT is(
     WHERE job_plan_id = '00000000-0000-0000-0000-000000000511'
     ORDER BY created_at DESC LIMIT 1),
   76.00,
-  'Test 24 — estimated_parts_cost = 76 (2×15.50 + 1×45)'
+  'Test 31 — estimated_parts_cost = 76 (2×15.50 + 1×45)'
 );
 
 ROLLBACK TO SAVEPOINT pm_test_5;

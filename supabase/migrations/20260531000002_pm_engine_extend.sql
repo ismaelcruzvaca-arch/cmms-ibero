@@ -121,16 +121,16 @@ BEGIN
 
     -- e. HEREDAR CHECKLIST TEMPLATES → checklist_instances (PENDING)
     -- Buscar templates por módulo del activo + por job_plan
+    -- Lógica: si tiene module_id solo → matchea módulo; si job_plan_id solo → matchea job plan; si ambos → requiere ambos
     FOR v_template IN
       SELECT ct.id AS template_id, ct.block_type, ct.description
       FROM checklist_templates ct
       WHERE ct.is_active = true
+        AND ct.job_plan_task_id IS NULL                               -- Plan-level (no task-specific)
         AND (
-          ct.module_id = r.module_id                                  -- Mismo módulo
-          OR ct.job_plan_id = r.job_plan_id                           -- O mismo job_plan
-        )
-        AND (
-          ct.job_plan_task_id IS NULL                                 -- Plan-level (no task-specific)
+          (ct.module_id = r.module_id AND ct.job_plan_id IS NULL)     -- Solo module-level
+          OR (ct.job_plan_id = r.job_plan_id AND ct.module_id IS NULL) -- Solo job-plan-level
+          OR (ct.module_id = r.module_id AND ct.job_plan_id = r.job_plan_id) -- Ambos deben coincidir
         )
     LOOP
       INSERT INTO checklist_instances (
@@ -147,16 +147,17 @@ BEGIN
     END LOOP;
 
     -- f. CALCULAR COSTOS ESTIMADOS
+    -- Usamos work_order_labor_estimates (snapshot clonado en paso c) como fuente de verdad
     UPDATE work_orders
     SET
-      -- Horas totales: SUM(estimated_hours × head_count)
+      -- Horas totales: SUM(estimated_hours × head_count) desde el snapshot de labor
       estimated_hours = COALESCE((
-        SELECT SUM(jpl.estimated_hours * jpl.head_count)
-        FROM job_plan_labor jpl
-        WHERE jpl.job_plan_id = r.job_plan_id
+        SELECT SUM(wole.estimated_hours * wole.head_count)
+        FROM work_order_labor_estimates wole
+        WHERE wole.work_order_id = v_wo_id
       ), 0),
 
-      -- Costo de partes: SUM(planned_qty × unit_cost)
+      -- Costo de partes: SUM(planned_qty × unit_cost) desde job_plan_materials
       estimated_parts_cost = COALESCE((
         SELECT SUM(jpm.planned_qty * COALESCE(sp.unit_cost, 0))
         FROM job_plan_materials jpm
@@ -164,11 +165,11 @@ BEGIN
         WHERE jpm.job_plan_id = r.job_plan_id
       ), 0),
 
-      -- Costo de mano de obra: SUM(estimated_hours × head_count × hourly_rate)
+      -- Costo de mano de obra: SUM(estimated_hours × head_count × hourly_rate) desde el snapshot
       estimated_labor_cost = COALESCE((
-        SELECT SUM(jpl.estimated_hours * jpl.head_count * jpl.hourly_rate)
-        FROM job_plan_labor jpl
-        WHERE jpl.job_plan_id = r.job_plan_id
+        SELECT SUM(wole.estimated_hours * wole.head_count * wole.hourly_rate)
+        FROM work_order_labor_estimates wole
+        WHERE wole.work_order_id = v_wo_id
       ), 0)
     WHERE id = v_wo_id;
 
