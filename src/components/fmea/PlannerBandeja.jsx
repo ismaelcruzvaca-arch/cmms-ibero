@@ -72,6 +72,7 @@ export default function PlannerBandeja() {
   const [analyses, setAnalyses] = useState([]);
   const [assets, setAssets] = useState([]);
   const [componentTypes, setComponentTypes] = useState([]);
+  const [componentMap, setComponentMap] = useState({}); // componentId → componentTypeId
   const [dataLoading, setDataLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -116,6 +117,17 @@ export default function PlannerBandeja() {
           selector: { _deleted: false }
         }).exec();
         setComponentTypes(ctDocs.map((d) => d.toJSON()));
+
+        // Asset components → mapa componentId → componentTypeId
+        const acDocs = await db.asset_components.find({
+          selector: { _deleted: false }
+        }).exec();
+        const map = {};
+        acDocs.forEach((d) => {
+          const json = d.toJSON();
+          map[json.id] = json.component_type_id;
+        });
+        setComponentMap(map);
       } catch (err) {
         console.error('[PlannerBandeja] Error cargando catálogos:', err);
       }
@@ -157,9 +169,8 @@ export default function PlannerBandeja() {
   const pendingAnalyses = analyses
     .filter((a) => {
       if (!filterComponentType) return true;
-      // Buscar el tipo de componente del análisis
-      // Necesitamos el component_type_id desde el asset_component
-      return true; // El filtro se aplica sobre datos enriquecidos
+      const ctId = componentMap[a.componentId];
+      return ctId === filterComponentType;
     })
     .sort((a, b) => {
       const dir = orderDir === 'asc' ? 1 : -1;
