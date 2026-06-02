@@ -16,7 +16,7 @@ SDD 1 construyó el lenguaje común del dato de condición: FeatureSet v0.2, cat
 - Source capability enforcement: toda ingesta valida contra `condition_source_capabilities` (feature_key + method_key + unidad). Sin capability → rechazo o quality_flag degradado.
 
 #### Manual Capture
-- UI de captura manual con trazabilidad completa: operator_user_id, measured_at, entered_at, instrument, method_key, quality_flag, operational_context, notes
+- UI de captura manual con trazabilidad completa: measured_by_user_id, entered_by_user_id (pueden ser distintos), measured_at, entered_at, instrument_ref, method_key, quality_flag, operational_context, notes
 - FeatureSet v0.2 client-side construction → POST a ingest-condition
 - Offline-first: captura local → cola RxDB → sync cuando haya red (measured_at preservado)
 
@@ -120,22 +120,26 @@ SDD 1 construyó el lenguaje común del dato de condición: FeatureSet v0.2, cat
 
 ## Policy: Qué puede hacer cada fuente según su estado
 
-| Estado | Guardar dato | Afectar HI | Generar evento | Crear OT |
-|--------|-------------|------------|----------------|----------|
-| `draft` | ❌ | ❌ | ❌ | ❌ |
-| `candidate` | ✅ (G2 forzado) | ❌ | ❌ | ❌ |
-| `field_trial` | ✅ | ✅ (marcado) | Evento `info` solamente | ❌ |
-| `active` | ✅ | ✅ | ✅ | ✅ |
-| `disabled` | ❌ | ❌ | ❌ | ❌ |
-| `deprecated` | ❌ (solo histórico) | ❌ | ❌ | ❌ |
+| Estado | Guardar dato | Afectar HI | Generar evento | Crear OT | Reprocess dead-letter |
+|--------|-------------|------------|----------------|----------|----------------------|
+| `draft` | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `candidate` | ✅ (G2 forzado) | ❌ | ❌ | ❌ | ✅ (sigue G2) |
+| `field_trial` | ✅ | ✅ (marcado) | Evento `info` solamente | ❌ | ✅ |
+| `active` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `disabled` | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `deprecated` | ❌ (solo histórico) | ❌ | ❌ | ❌ | ❌ |
 
 ## Late Data Policy
 
+La política de datos tardíos es **configurable** por source_type. El default seguro es 24h, pero puede ajustarse según el contexto (ej: análisis de aceite de laboratorio puede ser relevante con 72h de retraso; CSV histórico nunca genera eventos).
+
 | Retraso | Guardar | Recalcular HI | Generar evento | Crear OT |
 |---------|---------|---------------|----------------|----------|
-| ≤ 24h | ✅ | ✅ | ✅ | ✅ |
-| > 24h, ≤ 7d | ✅ | ✅ (marcado late) | ❌ | ❌ |
+| ≤ cutoff (default 24h) | ✅ | ✅ | ✅ | ✅ |
+| > cutoff, ≤ 7d | ✅ | ✅ (marcado late) | ❌ | ❌ |
 | > 7d | ✅ (solo histórico) | ❌ | ❌ | ❌ |
+
+**Configuración**: `late_event_cutoff_hours` por `source_type` y `feature_category`. CSV histórico y fuentes `candidate` tienen cutoff=0 (nunca generan eventos).
 
 ## Idempotency Keys por Source Type
 
