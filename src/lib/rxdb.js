@@ -339,7 +339,12 @@ async function _createDatabase() {
       component_types: { schema: componentTypeSchema },
       asset_components: { schema: assetComponentSchema },
       failure_mode_catalog: { schema: failureModeCatalogSchema },
-      fmea_rcm_analysis: { schema: fmeaAnalysisSchema }
+      fmea_rcm_analysis: { schema: fmeaAnalysisSchema },
+      // ── Condition Monitoring (SDD 2) ──
+      condition_feature_definitions: { schema: conditionFeatureDefSchema },
+      condition_sources: { schema: conditionSourcesSchema },
+      condition_source_capabilities: { schema: conditionSourceCapsSchema },
+      condition_capture_queue: { schema: captureQueueSchema }
     });
   } catch (err) {
     const errorStr = String(err);
@@ -368,7 +373,11 @@ async function _createDatabase() {
         component_types: { schema: componentTypeSchema },
         asset_components: { schema: assetComponentSchema },
         failure_mode_catalog: { schema: failureModeCatalogSchema },
-        fmea_rcm_analysis: { schema: fmeaAnalysisSchema }
+        fmea_rcm_analysis: { schema: fmeaAnalysisSchema },
+        condition_feature_definitions: { schema: conditionFeatureDefSchema },
+        condition_sources: { schema: conditionSourcesSchema },
+        condition_source_capabilities: { schema: conditionSourceCapsSchema },
+        condition_capture_queue: { schema: captureQueueSchema }
       });
       newDb.work_orders.preSave((plainData, doc) => {
         const oldPhase = doc.lifecycle_phase;
@@ -955,6 +964,9 @@ export async function startAllReplications(db) {
     push: { handler: fmeaPush }
   });
 
+  // ── Condition Monitoring Replications (SDD 2) ──
+  startConditionReplications(db);
+
   // Suscripciones a estados
   Object.entries(replicationStates).forEach(([key, state]) => {
     state.active$.subscribe(isActive => {
@@ -1374,7 +1386,145 @@ const fmeaAnalysisSchema = {
   required: ['id', 'asset_id', 'component_id', 'failure_mode_id', 'severity', 'occurrence', 'detection']
 };
 
+// ============================================
+// CONDITION MONITORING SCHEMAS (SDD 2 — Pull-Only + Offline Queue)
+// ============================================
+
+const conditionFeatureDefSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    feature_key: { type: 'string' },
+    unit: { type: 'string' },
+    category: { type: 'string' },
+    description: { type: 'string' },
+    default_weight: { type: 'number' },
+    created_at: { type: 'string' }
+  },
+  required: ['id', 'feature_key', 'unit', 'category']
+};
+
+const conditionSourcesSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    source_id: { type: 'string' },
+    source_type: { type: 'string' },
+    name: { type: 'string' },
+    status: { type: 'string' },
+    asset_id: { type: 'string' },
+    owner: { type: 'string' },
+    last_seen_at: { type: 'string' },
+    validation_status: { type: 'string' },
+    late_event_cutoff_hours: { type: 'number' },
+    created_by: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'source_id', 'source_type', 'name', 'status']
+};
+
+const conditionSourceCapsSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    source_id: { type: 'string' },
+    source_type: { type: 'string' },
+    can_produce: { type: 'string' },
+    method_key: { type: 'string' },
+    unit: { type: 'string' },
+    quality_expected: { type: 'string' },
+    validation_status: { type: 'string' },
+    late_event_cutoff_hours: { type: 'number' },
+    created_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'source_id', 'can_produce', 'method_key']
+};
+
+const captureQueueSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    payload: { type: 'object' },
+    measured_at: { type: 'string' },
+    status: { type: 'string', enum: ['pending', 'syncing', 'synced', 'failed'] },
+    created_at: { type: 'string' },
+    synced_at: { type: 'string' },
+    error_message: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'payload', 'measured_at', 'status']
+};
+
+// ── Pull-only handler for catalog tables ──
+function createPullOnlyHandler(tableName, orderField = 'id') {
+  return createPullHandler(tableName, orderField);
+}
+
+// ── Condition replications (pull-only for catalogs) ──
+function startConditionReplications(db) {
+  if (!db.condition_feature_definitions) return;
+
+  // condition_feature_definitions (pull-only — catálogo de features)
+  replicationStates.condition_feature_definitions = replicateRxCollection({
+    collection: db.condition_feature_definitions,
+    replicationIdentifier: 'cmms-cfd-sync',
+    live: true,
+    retryTime: 30000, // Menos frecuente, es catálogo
+    pull: { handler: createPullOnlyHandler('condition_feature_definitions', 'id') }
+  });
+
+  // condition_sources (pull-only — registro de fuentes)
+  if (db.condition_sources) {
+    replicationStates.condition_sources = replicateRxCollection({
+      collection: db.condition_sources,
+      replicationIdentifier: 'cmms-cs-sync',
+      live: true,
+      retryTime: 30000,
+      pull: { handler: createPullOnlyHandler('condition_sources', 'source_id') }
+    });
+  }
+
+  // condition_source_capabilities (pull-only)
+  if (db.condition_source_capabilities) {
+    replicationStates.condition_source_capabilities = replicateRxCollection({
+      collection: db.condition_source_capabilities,
+      replicationIdentifier: 'cmms-cscap-sync',
+      live: true,
+      retryTime: 30000,
+      pull: { handler: createPullOnlyHandler('condition_source_capabilities', 'id') }
+    });
+  }
+
+  // condition_capture_queue — local-only, no replication
+  // Las capturas offline se envían manualmente vía useConditionCapture
+
+  // Suscripciones
+  ['condition_feature_definitions', 'condition_sources', 'condition_source_capabilities'].forEach((key) => {
+    const state = replicationStates[key];
+    if (state) {
+      state.active$.subscribe(isActive => {
+        console.log(`[RxDB] ${key} activa:`, isActive);
+      });
+      state.error$.subscribe(error => {
+        if (error) console.error(`[RxDB] Error ${key}:`, error);
+      });
+    }
+  });
+}
+
 export { workOrderSchema, assetSchema, assetHierarchySchema, materialRequestSchema, laborRecordSchema,
          causaFallaSchema, checklistTemplateSchema, checklistInstanceSchema,
          checklistItemResponseSchema, checklistSamplingConfigSchema,
-         componentTypeSchema, assetComponentSchema, failureModeCatalogSchema, fmeaAnalysisSchema };
+         componentTypeSchema, assetComponentSchema, failureModeCatalogSchema, fmeaAnalysisSchema,
+         conditionFeatureDefSchema, conditionSourcesSchema, conditionSourceCapsSchema, captureQueueSchema };

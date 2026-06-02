@@ -11,6 +11,11 @@ import { AssetDetailsPanel } from './components/AssetDetailsPanel';
 import QRScannerModal from './components/QRScannerModal';
 import MechanicDashboard from './pages/MechanicDashboard.jsx';
 import PlannerBandeja from './components/fmea/PlannerBandeja.jsx';
+import ConditionCapture from './components/condition/ConditionCapture.jsx';
+import CsvImportForm from './components/condition/CsvImportForm.jsx';
+import SourceManagementPanel from './components/condition/SourceManagementPanel.jsx';
+import DeadLetterPanel from './components/condition/DeadLetterPanel.jsx';
+import TrendChart from './components/condition/charts/TrendChart.jsx';
 import { supabase } from './lib/supabaseClient';
 import './App.css';
 
@@ -20,6 +25,10 @@ function App() {
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
+  const [conditionSubTab, setConditionSubTab] = useState(0);
+
+  // Índice dinámico del tab "Monitoreo de Condición" (varía según rol)
+  const monitoringTabIndex = (userRole === 'PLANNER' || userRole === 'ADMIN') ? 3 : 2;
 
   // ─── Auth / Rol ─────────────────────────────────────────────────────
   const [userRole, setUserRole] = useState(null);
@@ -190,66 +199,131 @@ function App() {
               }
             />
           )}
+          {(userRole === 'TECHNICIAN' || userRole === 'PLANNER' || userRole === 'ADMIN') && (
+            <Tab label="Monitoreo de Condición" />
+          )}
         </Tabs>
 
-        {activeTab === 0 ? (
-          <Paper variant="outlined" sx={{ p: 3 }}>
-            <MechanicDashboard />
-          </Paper>
-        ) : activeTab === 1 ? (
-          <Grid container spacing={3} alignItems="flex-start">
-
-            {/* Columna principal: Árbol de activos */}
-            <Grid size={{ xs: 12, md: 8, lg: 9 }}>
-              <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-                <AssetTree onSelectAsset={handleSelectAsset} />
-              </Paper>
-            </Grid>
-
-            {/* Columna lateral: Estadísticas / ayuda rápida en desktop */}
-            <Grid size={{ xs: 12, md: 4, lg: 3 }}>
+        {(() => {
+          if (activeTab === 0) {
+            return (
               <Paper variant="outlined" sx={{ p: 3 }}>
-                <Typography variant="subtitle2" fontWeight="700" color="primary.main" gutterBottom>
-                  💡 Cómo navegar
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
-                  Usá el <strong>buscador</strong> para localizar un equipo por su ID (ej. <code>TOS-MOT</code>) o por descripción.
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
-                  Hacé clic en cualquier nodo del árbol para expandir su jerarquía de equipos.
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-                  Al seleccionar un equipo, se abre el <strong>panel de detalles</strong> con sus especificaciones técnicas.
-                </Typography>
-
-                <Box sx={{ mt: 3, pt: 2, borderTop: 1, borderColor: 'divider' }}>
-                  <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 0.5 }}>
-                    Base de datos
-                  </Typography>
-                  <Typography variant="body2" fontWeight="600" color="text.primary">
-                    535 equipos indexados
-                  </Typography>
-                  <Typography variant="caption" color="text.disabled">
-                    Sincronizado desde Epicor vía Supabase
-                  </Typography>
-                </Box>
+                <MechanicDashboard />
               </Paper>
-            </Grid>
+            );
+          }
+          if (activeTab === 1) {
+            return (
+              <Grid container spacing={3} alignItems="flex-start">
 
-          </Grid>
-        ) : activeTab === 2 && (userRole === 'PLANNER' || userRole === 'ADMIN') ? (
-          <Paper variant="outlined" sx={{ p: 3 }}>
-            <PlannerBandeja />
-          </Paper>
-        ) : (
-          <Grid container spacing={3} alignItems="flex-start">
-            <Grid size={{ xs: 12, md: 8, lg: 9 }}>
-              <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-                <AssetTree onSelectAsset={handleSelectAsset} />
+                {/* Columna principal: Árbol de activos */}
+                <Grid size={{ xs: 12, md: 8, lg: 9 }}>
+                  <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+                    <AssetTree onSelectAsset={handleSelectAsset} />
+                  </Paper>
+                </Grid>
+
+                {/* Columna lateral: Estadísticas / ayuda rápida en desktop */}
+                <Grid size={{ xs: 12, md: 4, lg: 3 }}>
+                  <Paper variant="outlined" sx={{ p: 3 }}>
+                    <Typography variant="subtitle2" fontWeight="700" color="primary.main" gutterBottom>
+                      💡 Cómo navegar
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
+                      Usá el <strong>buscador</strong> para localizar un equipo por su ID (ej. <code>TOS-MOT</code>) o por descripción.
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
+                      Hacé clic en cualquier nodo del árbol para expandir su jerarquía de equipos.
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
+                      Al seleccionar un equipo, se abre el <strong>panel de detalles</strong> con sus especificaciones técnicas.
+                    </Typography>
+
+                    <Box sx={{ mt: 3, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+                      <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 0.5 }}>
+                        Base de datos
+                      </Typography>
+                      <Typography variant="body2" fontWeight="600" color="text.primary">
+                        535 equipos indexados
+                      </Typography>
+                      <Typography variant="caption" color="text.disabled">
+                        Sincronizado desde Epicor vía Supabase
+                      </Typography>
+                    </Box>
+                  </Paper>
+                </Grid>
+
+              </Grid>
+            );
+          }
+          if (activeTab === 2 && (userRole === 'PLANNER' || userRole === 'ADMIN')) {
+            return (
+              <Paper variant="outlined" sx={{ p: 3 }}>
+                <PlannerBandeja />
               </Paper>
+            );
+          }
+          if (activeTab === monitoringTabIndex) {
+            return (
+              <Box>
+                <Tabs
+                  value={conditionSubTab}
+                  onChange={(e, v) => setConditionSubTab(v)}
+                  sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+                >
+                  <Tab label="Captura" />
+                  {(userRole === 'PLANNER' || userRole === 'ADMIN') && <Tab label="CSV" />}
+                  <Tab label="Fuentes" />
+                  {(userRole === 'PLANNER' || userRole === 'ADMIN') && <Tab label="Dead-Letter" />}
+                  <Tab label="Tendencias" />
+                </Tabs>
+                {(() => {
+                  // Computar índice real basado en visibilidad condicional
+                  let tradIdx = -1;
+                  let csvIdx = -1;
+                  let fuentesIdx = -1;
+                  let deadIdx = -1;
+
+                  if (userRole === 'PLANNER' || userRole === 'ADMIN') {
+                    // Captura=0, CSV=1, Fuentes=2, Dead-Letter=3, Tendencias=4
+                    csvIdx = 1;
+                    fuentesIdx = 2;
+                    deadIdx = 3;
+                    tradIdx = 4;
+                  } else {
+                    // Captura=0, Fuentes=1, Tendencias=2
+                    fuentesIdx = 1;
+                    tradIdx = 2;
+                  }
+
+                  if (conditionSubTab === tradIdx && tradIdx !== -1) {
+                    return (
+                      <Box>
+                        <TrendChart
+                          assetId={selectedAsset?.id || null}
+                          featureKey={null}
+                        />
+                      </Box>
+                    );
+                  }
+                  if (conditionSubTab === fuentesIdx) return <SourceManagementPanel />;
+                  if (conditionSubTab === csvIdx && csvIdx !== -1) return <CsvImportForm />;
+                  if (conditionSubTab === deadIdx && deadIdx !== -1) return <DeadLetterPanel />;
+                  return <ConditionCapture />;
+                })()}
+              </Box>
+            );
+          }
+          return (
+            <Grid container spacing={3} alignItems="flex-start">
+              <Grid size={{ xs: 12, md: 8, lg: 9 }}>
+                <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+                  <AssetTree onSelectAsset={handleSelectAsset} />
+                </Paper>
+              </Grid>
             </Grid>
-          </Grid>
-        )}
+          );
+        })()}
       </Box>
 
       {/* Panel lateral de detalles */}
