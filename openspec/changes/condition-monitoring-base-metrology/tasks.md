@@ -21,10 +21,10 @@ Chain strategy: stacked-to-main
 - [x] T-1.1: Mig 1 — `condition_feature_definitions` DDL + seed 12 features with default_weight
 - [x] T-1.2: Mig 2 — `condition_analysis_methods` DDL + seed 12 methods across 5 categories with validation_status
 - [x] T-1.3: Mig 3 — `condition_source_capabilities` DDL + FK→methods + UNIQUE(source_id,can_produce,method_key) + source_type CHECK
-- [ ] T-1.4: Mig 4a — `condition_windows` + `condition_feature_values` + `condition_events` DDL + indexes + FKs
+- [x] T-1.4: Mig 4a — `condition_windows` + `condition_feature_values` + `condition_events` DDL + indexes + FKs **(windows + feature_values done in PR 1c; condition_events deferred to PR 1d)**
 - [x] T-1.5: Mig 4b — `condition_threshold_catalog` DDL + seed ISO 10816/20816 for 4 asset_classes × 2 mountings + generic fallback (9 rows, all bench_validated)
-- [ ] T-1.6: Mig 4c — RLS on 7 PR1 tables: SELECT authenticated, INSERT/UPDATE/DELETE by role (ADMIN/PLANNER catalogs, ADMIN events)
-- [ ] T-1.7: `ingest-condition` EF — POST FeatureSet v0.2: validate 11 mandatory fields, soft-validate method (force G2 if missing), hard-validate feature FK, check source capabilities (reject unregistered, force G2 if ∉active/field_trial), upsert window+insert fv
+- [x] T-1.6: Mig 4c — RLS on 7 PR1 tables: SELECT authenticated, INSERT/UPDATE/DELETE by role (ADMIN/PLANNER catalogs, ADMIN events)
+- [x] T-1.7: `ingest-condition` EF — POST FeatureSet v0.2: validate 11 mandatory fields, soft-validate method (force G2 if missing), hard-validate feature FK, check source capabilities (reject unregistered, force G2 if ∉active/field_trial), upsert window+insert fv **(PR 1c — Edge Function local file ready; Supabase deploy blocked by platform)**
 - [ ] T-1.8: `ingest-events` EF — POST validate event_type/severity/asset_id, INSERT condition_events
 - [x] T-1.9: pgTAP PR1 (parcial — catálogos) — schema+constraints+seed counts, CHECKs, FK readiness, RLS (39 assertions en condition_catalogs_test.sql)
 
