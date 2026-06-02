@@ -16,6 +16,9 @@ import CsvImportForm from './components/condition/CsvImportForm.jsx';
 import SourceManagementPanel from './components/condition/SourceManagementPanel.jsx';
 import DeadLetterPanel from './components/condition/DeadLetterPanel.jsx';
 import TrendChart from './components/condition/charts/TrendChart.jsx';
+import DiagnosisPanel from './components/condition/DiagnosisPanel.jsx';
+import RulGauge from './components/condition/RulGauge.jsx';
+import RecommendationCard from './components/condition/RecommendationCard.jsx';
 import { supabase } from './lib/supabaseClient';
 import './App.css';
 
@@ -276,6 +279,7 @@ function App() {
                   <Tab label="Fuentes" />
                   {(userRole === 'PLANNER' || userRole === 'ADMIN') && <Tab label="Dead-Letter" />}
                   <Tab label="Tendencias" />
+                  <Tab label="Diagnóstico" />
                 </Tabs>
                 {(() => {
                   // Computar índice real basado en visibilidad condicional
@@ -283,19 +287,31 @@ function App() {
                   let csvIdx = -1;
                   let fuentesIdx = -1;
                   let deadIdx = -1;
+                  let diagIdx = -1;
 
                   if (userRole === 'PLANNER' || userRole === 'ADMIN') {
-                    // Captura=0, CSV=1, Fuentes=2, Dead-Letter=3, Tendencias=4
+                    // Captura=0, CSV=1, Fuentes=2, Dead-Letter=3, Tendencias=4, Diagnóstico=5
                     csvIdx = 1;
                     fuentesIdx = 2;
                     deadIdx = 3;
                     tradIdx = 4;
+                    diagIdx = 5;
                   } else {
-                    // Captura=0, Fuentes=1, Tendencias=2
+                    // Captura=0, Fuentes=1, Tendencias=2, Diagnóstico=3
                     fuentesIdx = 1;
                     tradIdx = 2;
+                    diagIdx = 3;
                   }
 
+                  if (conditionSubTab === diagIdx && diagIdx !== -1) {
+                    return (
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <RulGauge assetId={selectedAsset?.id || null} />
+                        <DiagnosisPanel assetId={selectedAsset?.id || null} />
+                        <RecommendationCard assetId={selectedAsset?.id || null} />
+                      </Box>
+                    );
+                  }
                   if (conditionSubTab === tradIdx && tradIdx !== -1) {
                     return (
                       <Box>
