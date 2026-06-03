@@ -82,7 +82,7 @@ CREATE INDEX idx_asset_spare_parts_part ON public.asset_spare_parts(part_num);
 
 CREATE TABLE public.material_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  work_order_id UUID NOT NULL REFERENCES public.work_orders(id) ON DELETE CASCADE,
+  work_order_id TEXT NOT NULL REFERENCES public.work_orders(id) ON DELETE CASCADE,
   part_num TEXT REFERENCES public.spare_parts(part_num) ON DELETE SET NULL,
   line_desc TEXT NOT NULL,
   is_non_stock BOOLEAN NOT NULL DEFAULT false,
@@ -118,7 +118,7 @@ CREATE TABLE public.inventory_transactions (
   lot_num TEXT,
   serial_num TEXT,
   reason_code TEXT,
-  work_order_id UUID REFERENCES public.work_orders(id) ON DELETE SET NULL,
+  work_order_id TEXT REFERENCES public.work_orders(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

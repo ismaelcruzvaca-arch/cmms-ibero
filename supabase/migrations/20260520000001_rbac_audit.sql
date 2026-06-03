@@ -57,7 +57,7 @@ CREATE TRIGGER on_auth_user_created
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   table_name TEXT NOT NULL,
-  record_id UUID NOT NULL,
+  record_id TEXT NOT NULL,
   action TEXT NOT NULL CHECK (action IN ('INSERT','UPDATE','DELETE')),
   old_data JSONB,
   new_data JSONB,
@@ -75,7 +75,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_record_id UUID;
+  v_record_id TEXT;
 BEGIN
   -- Determinar record_id segÃºn la operaciÃ³n
   IF TG_OP IN ('INSERT', 'UPDATE') THEN

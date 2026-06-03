@@ -78,7 +78,7 @@ BEGIN
         dc.path || ps.id,
         TRUE
       FROM pm_schedules ps
-      INNER JOIN due_chain dc ON ps.parent_schedule_id = dc.id
+      INNER JOIN due_chain dc ON ps.parent_schedule_id = dc.schedule_id
       WHERE ps.next_target_date IS NOT NULL
         AND ps.next_target_date::DATE <= CURRENT_DATE
         AND NOT ps.id = ANY(dc.path)

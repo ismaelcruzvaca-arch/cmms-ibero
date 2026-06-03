@@ -5,16 +5,25 @@
 -- Job Plans: LUB-01 (Lubricación), MEC-FAJA-01 (Cambio de Faja)
 -- Spare Parts: GRASA-LITIO, FAJA-24IN
 -- PM Schedules: LUB-01 cada 30d (vence HOY), MEC-FAJA-01 cada 180d (vence HOY+5)
+-- Jerarquía: MEC-FAJA-01 es padre de LUB-01 (suprime lubricación si hay cambio)
 --
 -- Idempotente: se puede ejecutar múltiples veces sin duplicar.
 -- ============================================================
 
 DO $$
 DECLARE
-  v_asset_id INT;
+  v_asset_id TEXT;
   v_lub_jp_id UUID;
   v_faja_jp_id UUID;
+  v_lub_sched_id UUID;
+  v_faja_sched_id UUID;
 BEGIN
+  -- ============================================================
+  -- 0. ASEGURAR TIPO DE ACTIVO
+  -- ============================================================
+  INSERT INTO asset_types (id, name) VALUES ('BANDA', 'Banda Transportadora')
+  ON CONFLICT (id) DO NOTHING;
+
   -- ============================================================
   -- 1. SPARE PARTS (catálogo de refacciones)
   -- ============================================================
@@ -27,19 +36,25 @@ BEGIN
   -- ============================================================
   -- 2. ACTIVO
   -- ============================================================
-  INSERT INTO assets (equipment_id, description, asset_type_id, site, location, criticality)
+  INSERT INTO assets (id, equipment_id, description, asset_type_id, site, location, criticality)
   VALUES (
     'BANDA-TR-01',
+    'BANDA-TR-01',
     'Banda Transportadora Principal — Línea 1',
-    121,  -- BANDA TRANSPORTADORA
+    'BANDA',
     'PLANTA_GENERAL',
     'NAVE_A_LINEA_1',
     'A'
   )
-  ON CONFLICT (equipment_id) DO UPDATE SET
+  ON CONFLICT (id) DO UPDATE SET
     description = EXCLUDED.description,
     asset_type_id = EXCLUDED.asset_type_id
   RETURNING id INTO v_asset_id;
+
+  -- Si el activo ya existía, RETURNING no devuelve nada → leerlo directo
+  IF v_asset_id IS NULL THEN
+    SELECT id INTO v_asset_id FROM assets WHERE equipment_id = 'BANDA-TR-01';
+  END IF;
 
   -- ============================================================
   -- 3. JOB PLANS (idempotente por code UNIQUE)
@@ -71,18 +86,38 @@ BEGIN
   END IF;
 
   -- ============================================================
-  -- 5. PM SCHEDULES (solo si no existen para este activo+job_plan)
+  -- 5. PM SCHEDULES con JERARQUÍA de supresión
+  --    MEC-FAJA-01 (180 días) es PADRE de LUB-01 (30 días)
+  --    LUB-01 vence HOY → genera OT
+  --    MEC-FAJA-01 vence HOY+5 → no vence aún
   -- ============================================================
-  IF NOT EXISTS (SELECT 1 FROM pm_schedules WHERE asset_id = v_asset_id AND job_plan_id = v_lub_jp_id) THEN
-    INSERT INTO pm_schedules (asset_id, job_plan_id, time_frequency_days, next_target_date, is_floating, is_active)
-    VALUES (v_asset_id, v_lub_jp_id, 30, CURRENT_DATE, false, true);
+
+  -- Primero: padre (MEC-FAJA-01) con id fijo para referencia
+  INSERT INTO pm_schedules (id, asset_id, job_plan_id, time_frequency_days, next_target_date, is_floating)
+  VALUES (
+    'a0000000-0000-0000-0000-000000000001'::uuid,
+    v_asset_id, v_faja_jp_id, 180, CURRENT_DATE + 5, false
+  )
+  ON CONFLICT (id) DO NOTHING
+  RETURNING id INTO v_faja_sched_id;
+
+  IF v_faja_sched_id IS NULL THEN
+    v_faja_sched_id := 'a0000000-0000-0000-0000-000000000001'::uuid;
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM pm_schedules WHERE asset_id = v_asset_id AND job_plan_id = v_faja_jp_id) THEN
-    INSERT INTO pm_schedules (asset_id, job_plan_id, time_frequency_days, next_target_date, is_floating, is_active)
-    VALUES (v_asset_id, v_faja_jp_id, 180, CURRENT_DATE + 5, false, true);
+  -- Segundo: hijo (LUB-01) referenciando al padre
+  INSERT INTO pm_schedules (id, asset_id, job_plan_id, time_frequency_days, next_target_date, parent_schedule_id, is_floating)
+  VALUES (
+    'a0000000-0000-0000-0000-000000000002'::uuid,
+    v_asset_id, v_lub_jp_id, 30, CURRENT_DATE, 'a0000000-0000-0000-0000-000000000001'::uuid, false
+  )
+  ON CONFLICT (id) DO NOTHING
+  RETURNING id INTO v_lub_sched_id;
+
+  IF v_lub_sched_id IS NULL THEN
+    v_lub_sched_id := 'a0000000-0000-0000-0000-000000000002'::uuid;
   END IF;
 
-  RAISE NOTICE 'Seed completado: asset_id=%, LUB-01=%, MEC-FAJA-01=%',
-    v_asset_id, v_lub_jp_id, v_faja_jp_id;
+  RAISE NOTICE 'Seed completado: asset=%, LUB-01=%, MEC-FAJA-01=%, lub_sched=%, faja_sched=%',
+    v_asset_id, v_lub_jp_id, v_faja_jp_id, v_lub_sched_id, v_faja_sched_id;
 END $$;
