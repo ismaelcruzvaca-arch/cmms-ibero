@@ -344,7 +344,10 @@ async function _createDatabase() {
       condition_feature_definitions: { schema: conditionFeatureDefSchema },
       condition_sources: { schema: conditionSourcesSchema },
       condition_source_capabilities: { schema: conditionSourceCapsSchema },
-      condition_capture_queue: { schema: captureQueueSchema }
+      condition_capture_queue: { schema: captureQueueSchema },
+      // ── PDF Report Engine Collections ──
+      report_templates: { schema: reportTemplateSchema },
+      report_history: { schema: reportHistorySchema }
     });
   } catch (err) {
     const errorStr = String(err);
@@ -378,8 +381,10 @@ async function _createDatabase() {
         condition_feature_definitions: { schema: conditionFeatureDefSchema },
         condition_sources: { schema: conditionSourcesSchema },
         condition_source_capabilities: { schema: conditionSourceCapsSchema },
-        condition_capture_queue: { schema: captureQueueSchema }
-
+        condition_capture_queue: { schema: captureQueueSchema },
+        // ── PDF Report Engine Collections ──
+        report_templates: { schema: reportTemplateSchema },
+        report_history: { schema: reportHistorySchema }
       });
       newDb.work_orders.preSave((plainData, doc) => {
         const oldPhase = doc.lifecycle_phase;
@@ -970,6 +975,30 @@ export async function startAllReplications(db) {
   // ── Condition Monitoring Replications (SDD 2) ──
   startConditionReplications(db);
 
+  // ── PDF Report Engine Replications ──
+  // report_templates (pull-only — los templates se crean desde Supabase)
+  replicationStates.report_templates = replicateRxCollection({
+    collection: db.report_templates,
+    replicationIdentifier: 'cmms-rt-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('report_templates', 'updated_at') }
+  });
+
+  // report_history (pull + push — audit trail)
+  const REPORT_HISTORY_PUSH_FIELDS = [
+    'id', 'template_id', 'template_code', 'template_version',
+    'report_data', 'generated_by', 'generated_at'
+  ];
+
+  replicationStates.report_history = replicateRxCollection({
+    collection: db.report_history,
+    replicationIdentifier: 'cmms-rh-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('report_history', 'generated_at') },
+    push: { handler: createPushHandler('report_history', REPORT_HISTORY_PUSH_FIELDS) }
+  });
 
   // Suscripciones a estados
   Object.entries(replicationStates).forEach(([key, state]) => {
@@ -994,6 +1023,8 @@ function getPullOrderField(collectionName) {
   if (collectionName === 'asset_components') return 'id';
   if (collectionName === 'failure_mode_catalog') return 'id';
   if (collectionName === 'fmea_rcm_analysis') return 'updated_at';
+  if (collectionName === 'report_templates') return 'updated_at';
+  if (collectionName === 'report_history') return 'generated_at';
 
   return 'updated_at';
 }
@@ -1022,6 +1053,13 @@ function getPushHandler(collectionName) {
       'q1', 'q2', 'q3', 'q4', 'q5',
       'recommended_strategy', 'failure_cause', 'mitigation_actions', 'recommended_frequency',
       'analyzed_by', 'notes', 'created_at', 'updated_at'
+    ]);
+  }
+
+  if (collectionName === 'report_history') {
+    return createPushHandler(collectionName, [
+      'id', 'template_id', 'template_code', 'template_version',
+      'report_data', 'generated_by', 'generated_at'
     ]);
   }
 
@@ -1308,5 +1346,42 @@ const checklistSamplingConfigSchema = {
   required: ['id', 'block_type']
 };
 
+// ── PDF Report Engine Schemas ──
+
+const reportTemplateSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    code: { type: 'string', maxLength: 100 },
+    version: { type: 'number' },
+    name: { type: 'string' },
+    description: { type: 'string' },
+    template: { type: 'object' },
+    is_active: { type: 'boolean' },
+    created_by: { type: 'string' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' }
+  },
+  required: ['id', 'code', 'version']
+};
+
+const reportHistorySchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    template_id: { type: 'string' },
+    template_code: { type: 'string' },
+    template_version: { type: 'number' },
+    report_data: { type: 'object' },
+    generated_by: { type: 'string' },
+    generated_at: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id']
+};
 
 // 

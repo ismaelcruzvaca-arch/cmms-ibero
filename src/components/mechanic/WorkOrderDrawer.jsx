@@ -13,10 +13,14 @@ import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import CloseIcon from '@mui/icons-material/Close';
 import BuildIcon from '@mui/icons-material/Build';
+import PrintIcon from '@mui/icons-material/Print';
+import Tooltip from '@mui/material/Tooltip';
 import WorkOrderDetail from './WorkOrderDetail.jsx';
 import WorkOrderNotesForm from './WorkOrderNotesForm.jsx';
 import WorkOrderActions from './WorkOrderActions.jsx';
 import LaborClockWidget from './LaborClockWidget.jsx';
+import HtmlReportPreview from '../pdf/HtmlReportPreview.jsx';
+import { useReport } from '../../hooks/useReport.js';
 import { validateCompletion } from '../../lib/adapters/workOrderAdapter.js';
 import { initRxDB } from '../../lib/rxdb.js';
 
@@ -35,18 +39,22 @@ function useMaterialRequests(workOrderId) {
 
   useEffect(() => {
     if (!workOrderId) {
-      setMaterials([]);
+      // workOrderId no disponible aún — estado inicial ya es vacío
       return;
     }
 
     let cancelled = false;
-    setLoading(true);
 
     (async () => {
+      // Defer setState para evitar React 19 warning de setState síncrono en effect
+      await Promise.resolve();
+      if (cancelled) return;
+      setLoading(true);
+
       try {
         const db = await initRxDB();
         if (!db.material_requests || cancelled) {
-          setLoading(false);
+          if (!cancelled) setLoading(false);
           return;
         }
         const docs = await db.material_requests
@@ -79,6 +87,26 @@ export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition
 
   // Material requests
   const { materials, loading: materialsLoading } = useMaterialRequests(workOrder?.id);
+
+  // ── Print report ──
+  const [printOpen, setPrintOpen] = useState(false);
+
+  const report = useReport({
+    templateCode: 'work_order',
+    context: {
+      workOrder,
+      laborRecords: laborState?.records || [],
+      materialRequests: materials,
+    },
+  });
+
+  const handlePrintClick = useCallback(() => {
+    setPrintOpen(true);
+  }, []);
+
+  const handlePrintClose = useCallback(() => {
+    setPrintOpen(false);
+  }, []);
 
   // Confirmation dialog state
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -215,9 +243,19 @@ export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition
             )}
           </Box>
 
-          <IconButton onClick={onClose} disabled={isSubmitting} size="small">
-            <CloseIcon />
-          </IconButton>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {/* Imprimir OT — solo visible cuando la OT está completada o cerrada */}
+            {['COMP', 'CLOSED'].includes(workOrder.lifecyclePhase) && (
+              <Tooltip title="Imprimir orden de trabajo">
+                <IconButton onClick={handlePrintClick} size="small" color="primary">
+                  <PrintIcon />
+                </IconButton>
+              </Tooltip>
+            )}
+            <IconButton onClick={onClose} disabled={isSubmitting} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Box>
         </Box>
 
         <Divider sx={{ mb: 2 }} />
@@ -332,6 +370,19 @@ export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* ── Vista previa de impresión ── */}
+      {printOpen && (
+        <HtmlReportPreview
+          html={report.html}
+          loading={report.loading}
+          error={report.error}
+          empty={report.empty}
+          templateName={report.templateName}
+          onPrint={report.print}
+          onClose={handlePrintClose}
+        />
+      )}
     </>
   );
 }
