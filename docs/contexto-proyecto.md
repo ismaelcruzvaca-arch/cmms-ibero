@@ -20,7 +20,7 @@ Se está construyendo un sistema de gestión de mantenimiento (CMMS) personaliza
 - **Frontend:** React 18 con Vite, Material UI (MUI), React Router.
 - **Base de datos principal:** PostgreSQL alojada en Supabase (proyecto `cmms_ibero`).
 - **Backend externo futuro:** Node.js (Express) para implementar el patrón Outbox y sincronización con Epicor.
-- **Captura offline futura:** Firebase Firestore (sincronización cliente-servidor).
+- **Base de datos Local (Offline-First):** RxDB + Dexie sincronizando hacia Supabase. (Decisión: Firebase fue descartado).
 - **Integración con ERP:** Epicor Kinetic vía API REST (previa habilitación por el equipo de IT) y en una primera fase mediante plantillas DMT (Data Management Tool).
 
 ## Módulos Planificados del Sistema
@@ -51,4 +51,4 @@ Se está construyendo un sistema de gestión de mantenimiento (CMMS) personaliza
 ## Decisiones de Diseño Importantes
 - **Base de datos:** PostgreSQL (Supabase) con jerarquía manejada en tabla de asociación propia (`asset_hierarchy`) para no modificar el esquema de Epicor.
 - **Sincronización con Epicor:** La primera fase usará DMT (archivos CSV).
-- **Modo offline:** Se usará Firebase Firestore exclusivamente para la captura de datos en campo.
+- **Modo offline:** Se usa RxDB + Dexie (IndexedDB) para manejo nativo offline-first.
