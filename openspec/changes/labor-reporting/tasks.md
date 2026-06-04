@@ -14,12 +14,12 @@
 
 ## Phase 3: Frontend UI
 
-- [ ] 3.1 Create `src/components/mechanic/LaborClockWidget.jsx` with idle/active states, activity code selector (Spanish labels), live HH:MM:SS timer, error+retry handling
-- [ ] 3.2 Modify `src/components/mechanic/WorkOrderDrawer.jsx` — embed ClockWidget between detail section and action buttons
-- [ ] 3.3 Modify `src/components/mechanic/WorkOrderActions.jsx` — accept `hasActiveClock` prop, disable COMP with tooltip "Debés registrar Ingreso antes de Completar"
+- [x] 3.1 Create `src/components/mechanic/LaborClockWidget.jsx` with idle/active states, activity code selector (Spanish labels), live HH:MM:SS timer, error+retry handling
+- [x] 3.2 Modify `src/components/mechanic/WorkOrderDrawer.jsx` — embed ClockWidget between detail section and action buttons
+- [x] 3.3 Modify `src/components/mechanic/WorkOrderActions.jsx` — accept `hasActiveClock` prop, disable COMP with tooltip "Debés registrar Ingreso antes de Completar"
 
 ## Phase 4: Wiring & Verification
 
-- [ ] 4.1 Modify `src/pages/MechanicDashboard.jsx` — wire `useLaborRecords`, pass labor state (`hasActiveClock`, `activeSession`) to drawer
-- [ ] 4.2 Integrate `clockIn()`/`clockOut()` in drawer's `handleTransition`: write labor_record first, then WO status update (RxDB has no multi-collection tx)
+- [x] 4.1 Modify `src/pages/MechanicDashboard.jsx` — wire `useLaborRecords`, pass labor state (`hasActiveClock`, `activeSession`) to drawer
+- [x] 4.2 Integrate `clockIn()`/`clockOut()` in drawer's `handleTransition`: write labor_record first, then WO status update (RxDB has no multi-collection tx)
 - [ ] 4.3 End-to-end verification: clock-in→timer, clock-out→COMP enabled, offline sync→no duplicates, RLS isolation, COMP→CLOSED actual_hours populated

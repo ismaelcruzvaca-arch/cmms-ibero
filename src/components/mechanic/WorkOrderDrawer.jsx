@@ -16,6 +16,7 @@ import BuildIcon from '@mui/icons-material/Build';
 import WorkOrderDetail from './WorkOrderDetail.jsx';
 import WorkOrderNotesForm from './WorkOrderNotesForm.jsx';
 import WorkOrderActions from './WorkOrderActions.jsx';
+import LaborClockWidget from './LaborClockWidget.jsx';
 import { validateCompletion } from '../../lib/adapters/workOrderAdapter.js';
 import { initRxDB } from '../../lib/rxdb.js';
 
@@ -67,7 +68,9 @@ function useMaterialRequests(workOrderId) {
   return { materials, loading };
 }
 
-export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition }) {
+export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition, laborState }) {
+  // Labor state (clock-in/out) — solo relevante para APPROVED/INPRG
+  const hasActiveClock = !!laborState?.activeSession;
   // Local form state
   const [notes, setNotes] = useState({ symptom_note: '', cause_note: '', action_note: '' });
   const [errors, setErrors] = useState({});
@@ -127,6 +130,26 @@ export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition
     setTransitionError(null);
     setConfirmOpen(false);
 
+    // ── Paso 1: clockIn/clockOut si corresponde ──
+    if (pendingTarget === 'INPRG' && !laborState?.activeSession) {
+      const clockResult = await laborState.clockIn('DIRECT_WORK');
+      if (clockResult?.error) {
+        setTransitionError(clockResult.error);
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    if (pendingTarget === 'COMP' && laborState?.activeSession) {
+      const clockResult = await laborState.clockOut();
+      if (clockResult?.error) {
+        setTransitionError(clockResult.error);
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    // ── Paso 2: transición de WO ──
     const updates = { lifecycle_phase: pendingTarget };
     if (workOrder.lifecyclePhase === 'INPRG' && pendingTarget === 'COMP') {
       updates.symptom_note = notes.symptom_note;
@@ -142,7 +165,7 @@ export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition
       setTransitionError(result.error || 'Error al ejecutar la transición');
       setIsSubmitting(false);
     }
-  }, [pendingTarget, workOrder, notes, onTransition, onClose]);
+  }, [pendingTarget, workOrder, notes, onTransition, onClose, laborState]);
 
   const handleCancelConfirm = useCallback(() => {
     setConfirmOpen(false);
@@ -251,6 +274,20 @@ export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition
           </Typography>
         )}
 
+        {/* ── ClockWidget (solo APPROVED / INPRG) ── */}
+        {['APPROVED', 'INPRG'].includes(workOrder.lifecyclePhase) && laborState && (
+          <Box sx={{ mt: 2 }}>
+            <LaborClockWidget
+              activeSession={laborState.activeSession}
+              onClockIn={laborState.clockIn}
+              onClockOut={laborState.clockOut}
+              loading={laborState.loading}
+              error={laborState.error}
+              lifecyclePhase={workOrder.lifecyclePhase}
+            />
+          </Box>
+        )}
+
         <Divider sx={{ my: 2 }} />
 
         {/* ── Formulario de notas ── */}
@@ -274,6 +311,7 @@ export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition
           onAction={handleAction}
           isSubmitting={isSubmitting}
           validationErrors={Object.keys(errors)}
+          hasActiveClock={hasActiveClock}
         />
       </SwipeableDrawer>
 

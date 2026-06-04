@@ -10,17 +10,33 @@ const ACTION_CONFIG = {
   COMP: { label: 'Cerrar', color: 'warning' }
 };
 
-export default function WorkOrderActions({ lifecyclePhase, onAction, isSubmitting, validationErrors = [] }) {
+export default function WorkOrderActions({ lifecyclePhase, onAction, isSubmitting, validationErrors = [], hasActiveClock }) {
   const allowed = getAllowedTransitions(lifecyclePhase);
   const firstTarget = allowed[0];
   const config = firstTarget ? ACTION_CONFIG[lifecyclePhase] : null;
 
   if (!config) return null;
 
-  const isDisabled = isSubmitting || validationErrors.length > 0;
-  const tooltipText = validationErrors.length > 0
-    ? 'Completá los campos obligatorios (Síntomas y Acción) antes de finalizar.'
-    : '';
+  // Determinar si el botón está deshabilitado y el tooltip
+  let clockBlocked = false;
+  let clockTooltip = '';
+
+  if (lifecyclePhase === 'APPROVED' && !hasActiveClock) {
+    clockBlocked = true;
+    clockTooltip = 'Debés registrar Ingreso antes de Completar';
+  } else if (lifecyclePhase === 'INPRG' && !hasActiveClock) {
+    clockBlocked = true;
+    clockTooltip = 'Debés registrar Salida antes de Completar';
+  }
+
+  const isDisabled = isSubmitting || validationErrors.length > 0 || clockBlocked;
+
+  let tooltipText = '';
+  if (validationErrors.length > 0) {
+    tooltipText = 'Completá los campos obligatorios (Síntomas y Acción) antes de finalizar.';
+  } else if (clockBlocked) {
+    tooltipText = clockTooltip;
+  }
 
   const button = (
     <Button

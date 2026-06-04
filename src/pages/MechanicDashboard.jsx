@@ -1,10 +1,12 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import { useWorkOrders } from '../hooks/useWorkOrders';
+import { useLaborRecords } from '../hooks/useLaborRecords';
 import { toViewModelList } from '../lib/adapters/workOrderAdapter.js';
+import { supabase } from '../lib/supabaseClient.js';
 import { NavSyncIndicator } from '../components/SyncStatusIndicator.jsx';
 import WorkOrderList from '../components/mechanic/WorkOrderList.jsx';
 import WorkOrderDrawer from '../components/mechanic/WorkOrderDrawer.jsx';
@@ -35,6 +37,23 @@ export default function MechanicDashboard() {
   const handleTransition = useCallback(async (id, updates) => {
     return await updateWorkOrder(id, updates);
   }, [updateWorkOrder]);
+
+  // ── Obtener userId de la sesión ──
+  const [userId, setUserId] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.id) {
+        setUserId(session.user.id);
+      }
+    });
+  }, []);
+
+  // ── Labor records para el WO seleccionado ──
+  const laborState = useLaborRecords({
+    workOrderId: selectedWorkOrder?.id,
+    userId
+  });
 
   if (loading) {
     return (
@@ -68,6 +87,7 @@ export default function MechanicDashboard() {
           open={drawerOpen}
           onClose={handleCloseDrawer}
           onTransition={handleTransition}
+          laborState={laborState}
         />
       )}
     </Box>
