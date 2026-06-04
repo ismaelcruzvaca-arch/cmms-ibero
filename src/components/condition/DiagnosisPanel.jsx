@@ -18,7 +18,7 @@
  * active (verde), confirmed (verde oscuro), rejected (rojo).
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Paper,
@@ -35,12 +35,16 @@ import {
   Collapse,
   Button,
   LinearProgress,
+  CircularProgress,
 } from '@mui/material';
 import {
   KeyboardArrowDown,
   KeyboardArrowUp,
+  Send,
 } from '@mui/icons-material';
 import useDiagnoses from '../../hooks/useDiagnoses';
+import FeedbackForm from './FeedbackForm';
+import { supabase } from '../../lib/supabaseClient';
 
 // ─── Constantes ─────────────────────────────────────────────────
 const CONFIDENCE_COLORS = {
@@ -86,8 +90,11 @@ function formatDate(iso) {
 
 // ─── Fila expandible ────────────────────────────────────────────
 
-function DiagnosisRow({ diagnosis }) {
+function DiagnosisRow({ diagnosis, existingFeedback = [], onFeedbackSubmitted }) {
   const [open, setOpen] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [existingRec, setExistingRec] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
   const fm = diagnosis.failure_mode || {};
   const confidence = diagnosis.confidence;
   const breakdown = diagnosis.confidence_breakdown?.breakdown;
@@ -96,6 +103,56 @@ function DiagnosisRow({ diagnosis }) {
     diagnosis.diagnosis_status === 'active' &&
     confidence != null &&
     confidence >= 0.7;
+
+  const latestFeedback = existingFeedback.length > 0 ? existingFeedback[0] : null;
+
+  // Fetch existing recommendation for this diagnosis
+  useEffect(() => {
+    if (!diagnosis.id) return;
+    supabase
+      .from('maintenance_recommendations')
+      .select('id, status')
+      .eq('diagnosis_id', diagnosis.id)
+      .maybeSingle()
+      .then(({ data }) => setExistingRec(data || null))
+      .catch(() => setExistingRec(null));
+  }, [diagnosis.id]);
+
+  // RPC handlers
+  const handleGenerateRec = useCallback(async () => {
+    setActionLoading(true);
+    try {
+      const { error: rpcError } = await supabase
+        .rpc('generate_recommendation_v2', { p_diagnosis_id: diagnosis.id });
+      if (rpcError) throw new Error(rpcError.message);
+      // Refresh existing rec
+      const { data: recData } = await supabase
+        .from('maintenance_recommendations')
+        .select('id, status')
+        .eq('diagnosis_id', diagnosis.id)
+        .maybeSingle();
+      setExistingRec(recData || null);
+    } catch (err) {
+      console.error('[DiagnosisPanel] Error generando recomendación:', err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }, [diagnosis.id]);
+
+  const handleConvertToWO = useCallback(async () => {
+    if (!existingRec) return;
+    setActionLoading(true);
+    try {
+      const { data, error: rpcError } = await supabase
+        .rpc('convert_recommendation_to_wo', { p_recommendation_id: existingRec.id });
+      if (rpcError) throw new Error(rpcError.message);
+      console.log('[DiagnosisPanel] OT creada:', data);
+    } catch (err) {
+      console.error('[DiagnosisPanel] Error convirtiendo a OT:', err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }, [existingRec]);
 
   // Tooltip de desglose de confianza
   const tooltipContent = breakdown ? (
@@ -112,6 +169,12 @@ function DiagnosisRow({ diagnosis }) {
   ) : (
     'Sin desglose disponible'
   );
+
+  const FEEDBACK_STATUS_CHIP_COLOR = {
+    confirmed: 'success',
+    partial: 'info',
+    rejected: 'error',
+  };
 
   return (
     <>
@@ -164,27 +227,50 @@ function DiagnosisRow({ diagnosis }) {
           <Typography variant="body2">{diagnosis.linked_event_count ?? 0}</Typography>
         </TableCell>
         <TableCell>
+          {latestFeedback ? (
+            <Chip
+              label={latestFeedback.feedback_status}
+              size="small"
+              color={FEEDBACK_STATUS_CHIP_COLOR[latestFeedback.feedback_status] || 'default'}
+              variant="outlined"
+            />
+          ) : (
+            <Typography variant="caption" color="text.disabled">—</Typography>
+          )}
+        </TableCell>
+        <TableCell>
           <Typography variant="caption" color="text.secondary">
             {formatDate(diagnosis.created_at)}
           </Typography>
         </TableCell>
         <TableCell>
-          <Button
-            variant="contained"
-            size="small"
-            disabled={!canGenerateWO}
-            onClick={() => {
-              console.log('[DiagnosisPanel] Generar OT para diagnóstico:', diagnosis.id);
-            }}
-          >
-            Generar OT
-          </Button>
+          <Box sx={{ display: 'flex', gap: 0.5, flexDirection: 'column', alignItems: 'flex-start' }}>
+            <Button
+              variant="contained"
+              size="small"
+              disabled={!canGenerateWO || actionLoading}
+              onClick={handleGenerateRec}
+            >
+              {actionLoading ? <CircularProgress size={14} /> : 'Generar Recomendación'}
+            </Button>
+            {existingRec?.status === 'approved' && (
+              <Button
+                variant="outlined"
+                size="small"
+                color="primary"
+                disabled={actionLoading}
+                onClick={handleConvertToWO}
+              >
+                Convertir a OT
+              </Button>
+            )}
+          </Box>
         </TableCell>
       </TableRow>
 
-      {/* ── Fila expandida: evidencia ── */}
+      {/* ── Fila expandida: evidencia + feedback ── */}
       <TableRow>
-        <TableCell colSpan={7} sx={{ p: 0, border: 0 }}>
+        <TableCell colSpan={8} sx={{ p: 0, border: 0 }}>
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ px: 3, py: 2, bgcolor: 'action.hover' }}>
               <Typography variant="subtitle2" gutterBottom fontWeight={600}>
@@ -224,6 +310,63 @@ function DiagnosisRow({ diagnosis }) {
                   </Typography>
                 </Box>
               </Box>
+
+              {/* ── Feedback Section ── */}
+              <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                <Typography variant="subtitle2" gutterBottom fontWeight={600}>
+                  Feedback Técnico
+                </Typography>
+                {latestFeedback ? (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Chip
+                        label={latestFeedback.feedback_status}
+                        size="small"
+                        color={FEEDBACK_STATUS_CHIP_COLOR[latestFeedback.feedback_status] || 'default'}
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        por {latestFeedback.reviewed_by || '—'} el{' '}
+                        {formatDate(latestFeedback.reviewed_at)}
+                      </Typography>
+                    </Box>
+                    {latestFeedback.technician_observation && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        {latestFeedback.technician_observation}
+                      </Typography>
+                    )}
+                    <Button
+                      variant="text"
+                      size="small"
+                      onClick={() => setShowFeedback(!showFeedback)}
+                      sx={{ alignSelf: 'flex-start', mt: 0.5 }}
+                    >
+                      {showFeedback ? 'Ocultar feedback' : 'Agregar otro feedback'}
+                    </Button>
+                  </Box>
+                ) : (
+                  !showFeedback && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<Send fontSize="small" />}
+                      onClick={() => setShowFeedback(true)}
+                    >
+                      Enviar Feedback
+                    </Button>
+                  )
+                )}
+                {showFeedback && (
+                  <Box sx={{ mt: 2 }}>
+                    <FeedbackForm
+                      diagnosisId={diagnosis.id}
+                      onSubmit={() => {
+                        setShowFeedback(false);
+                        onFeedbackSubmitted?.();
+                      }}
+                    />
+                  </Box>
+                )}
+              </Box>
             </Box>
           </Collapse>
         </TableCell>
@@ -235,7 +378,43 @@ function DiagnosisRow({ diagnosis }) {
 // ─── DiagnosisPanel ─────────────────────────────────────────────
 
 export default function DiagnosisPanel({ assetId }) {
-  const { diagnoses, isLoading, error, refresh } = useDiagnoses({ assetId });
+  const { diagnoses, isLoading, error } = useDiagnoses({ assetId });
+  const [feedbackMap, setFeedbackMap] = useState({});
+
+  const fetchFeedback = useCallback(async () => {
+    if (diagnoses.length === 0) {
+      setFeedbackMap({});
+      return;
+    }
+
+    try {
+      const ids = diagnoses.map((d) => d.id);
+      const { data, error: fbError } = await supabase
+        .from('condition_diagnosis_feedback')
+        .select('*')
+        .in('diagnosis_id', ids)
+        .order('created_at', { ascending: false });
+
+      if (fbError) throw new Error(fbError.message);
+
+      const map = {};
+      (data || []).forEach((fb) => {
+        if (!map[fb.diagnosis_id]) map[fb.diagnosis_id] = [];
+        map[fb.diagnosis_id].push(fb);
+      });
+      setFeedbackMap(map);
+    } catch (err) {
+      console.warn('[DiagnosisPanel] Error fetching feedback:', err);
+    }
+  }, [diagnoses]);
+
+  useEffect(() => {
+    fetchFeedback();
+  }, [fetchFeedback]);
+
+  const handleFeedbackSubmitted = useCallback(() => {
+    fetchFeedback();
+  }, [fetchFeedback]);
 
   // ─── Estados ──────────────────────────────────────────────────
   if (isLoading) {
@@ -281,13 +460,19 @@ export default function DiagnosisPanel({ assetId }) {
               <TableCell sx={{ fontWeight: 700 }} align="center">
                 Eventos
               </TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Feedback</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>Creado</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>Acción</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {diagnoses.map((d) => (
-              <DiagnosisRow key={d.id} diagnosis={d} />
+              <DiagnosisRow
+                key={d.id}
+                diagnosis={d}
+                existingFeedback={feedbackMap[d.id] || []}
+                onFeedbackSubmitted={handleFeedbackSubmitted}
+              />
             ))}
           </TableBody>
         </Table>

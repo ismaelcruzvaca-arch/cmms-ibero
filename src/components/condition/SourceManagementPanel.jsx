@@ -7,20 +7,104 @@
  *
  * Visible para cualquier usuario autenticado.
  */
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Box, Paper, Typography, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Chip, CircularProgress,
-  Alert, Collapse, IconButton, Tooltip,
+  Alert, Collapse, IconButton, Tooltip, Popover,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useConditionSources, SOURCE_STATUS_COLORS } from '../../hooks/useConditionSources';
+import { supabase } from '../../lib/supabaseClient';
 
-export default function SourceManagementPanel() {
+const QUALITY_COLORS = {
+  G0: { bg: '#4caf50', label: 'Excelente' },
+  G1: { bg: '#8bc34a', label: 'Buena' },
+  G2: { bg: '#ff9800', label: 'Regular' },
+  G3: { bg: '#f44336', label: 'Mala' },
+};
+
+function getDominantGrade(stats) {
+  if (!stats) return 'G0';
+  const grades = [
+    { key: 'G0', pct: stats.g0_pct ?? 0 },
+    { key: 'G1', pct: stats.g1_pct ?? 0 },
+    { key: 'G2', pct: stats.g2_pct ?? 0 },
+    { key: 'G3', pct: stats.g3_pct ?? 0 },
+  ];
+  return grades.reduce((a, b) => (a.pct >= b.pct ? a : b)).key;
+}
+
+function isStale(lastSeenAt) {
+  if (!lastSeenAt) return false;
+  return Date.now() - new Date(lastSeenAt).getTime() > 24 * 60 * 60 * 1000;
+}
+
+export default function SourceManagementPanel({ onNavigate }) {
   const { sources, loading, error, refresh } = useConditionSources();
   const [expandedSource, setExpandedSource] = useState(null);
+  const [qualityData, setQualityData] = useState({});
+  const [deadLetterCounts, setDeadLetterCounts] = useState({});
+  const [qualityAnchorEl, setQualityAnchorEl] = useState(null);
+  const [selectedSourceId, setSelectedSourceId] = useState(null);
+  const qualityCacheRef = useRef({});
+  const qualityLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (qualityLoadedRef.current) return;
+    qualityLoadedRef.current = true;
+    supabase.rpc('compute_source_quality_stats').then(({ data, error }) => {
+      if (!error && data) {
+        const map = {};
+        data.forEach((item) => { map[item.source_id] = item; });
+        setQualityData(map);
+        qualityCacheRef.current = map;
+      }
+    }).catch((err) => console.warn('[SourceManagementPanel] Error loading quality:', err));
+  }, []);
+
+  useEffect(() => {
+    if (sources.length === 0) return;
+    supabase.from('condition_ingest_failures').select('source_id').then(({ data, error }) => {
+      if (!error && data) {
+        const map = {};
+        data.forEach((item) => { map[item.source_id] = (map[item.source_id] || 0) + 1; });
+        setDeadLetterCounts(map);
+      }
+    }).catch((err) => console.warn('[SourceManagementPanel] Error loading dead letters:', err));
+  }, [sources]);
+
+  async function fetchSourceQuality(sourceId) {
+    if (qualityCacheRef.current[sourceId]) return qualityCacheRef.current[sourceId];
+    try {
+      const { data, error } = await supabase.rpc('compute_source_quality_stats', { p_source_id: sourceId });
+      if (error) throw error;
+      const result = data?.[0] || null;
+      qualityCacheRef.current[sourceId] = result;
+      setQualityData((prev) => ({ ...prev, [sourceId]: result }));
+      return result;
+    } catch (err) {
+      console.warn('[SourceManagementPanel] Error fetching quality:', err);
+      return null;
+    }
+  }
+
+  const handleQualityClick = (event, sourceId) => {
+    setQualityAnchorEl(event.currentTarget);
+    setSelectedSourceId(sourceId);
+    fetchSourceQuality(sourceId);
+  };
+
+  const handleQualityClose = () => {
+    setQualityAnchorEl(null);
+    setSelectedSourceId(null);
+  };
+
+  const qualityOpen = Boolean(qualityAnchorEl);
+  const selectedQuality = selectedSourceId ? qualityData[selectedSourceId] : null;
 
   const toggleExpand = (sourceId) => {
     setExpandedSource((prev) => (prev === sourceId ? null : sourceId));
@@ -75,6 +159,7 @@ export default function SourceManagementPanel() {
               <TableCell><strong>Fuente</strong></TableCell>
               <TableCell><strong>Tipo</strong></TableCell>
               <TableCell><strong>Estado</strong></TableCell>
+              <TableCell><strong>Calidad</strong></TableCell>
               <TableCell><strong>Última actividad</strong></TableCell>
               <TableCell><strong>Capabilities</strong></TableCell>
               <TableCell><strong>Cutoff</strong></TableCell>
@@ -83,7 +168,7 @@ export default function SourceManagementPanel() {
           <TableBody>
             {sources.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} align="center">
+                <TableCell colSpan={7} align="center">
                   <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
                     No hay fuentes registradas
                   </Typography>
@@ -117,6 +202,43 @@ export default function SourceManagementPanel() {
                         fontWeight: 600,
                       }}
                     />
+                  </TableCell>
+
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      {qualityData[source.source_id] ? (
+                        <Chip
+                          label={getDominantGrade(qualityData[source.source_id])}
+                          size="small"
+                          sx={{
+                            bgcolor: QUALITY_COLORS[getDominantGrade(qualityData[source.source_id])]?.bg,
+                            color: '#fff',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                          onClick={(e) => handleQualityClick(e, source.source_id)}
+                        />
+                      ) : (
+                        <Typography variant="caption" color="text.disabled">—</Typography>
+                      )}
+                      {isStale(source.last_seen_at) && (
+                        <Tooltip title="Sin datos &gt;24h">
+                          <WarningAmberIcon fontSize="small" color="warning" />
+                        </Tooltip>
+                      )}
+                      {(deadLetterCounts[source.source_id] || 0) > 0 && (
+                        <Tooltip title={`${deadLetterCounts[source.source_id]} dead letters`}>
+                          <Chip
+                            label={deadLetterCounts[source.source_id]}
+                            size="small"
+                            color="error"
+                            variant="filled"
+                            sx={{ fontWeight: 700, cursor: 'pointer' }}
+                            onClick={() => onNavigate?.('dead-letter')}
+                          />
+                        </Tooltip>
+                      )}
+                    </Box>
                   </TableCell>
 
                   <TableCell>
@@ -191,6 +313,49 @@ export default function SourceManagementPanel() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* ── Quality Stats Popover ── */}
+      <Popover
+        open={qualityOpen}
+        anchorEl={qualityAnchorEl}
+        onClose={handleQualityClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 200 }}>
+          {selectedQuality ? (
+            <>
+              <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                {selectedQuality.source_name || selectedSourceId}
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 1 }}>
+                {['G0', 'G1', 'G2', 'G3'].map((g) => (
+                  <Box key={g} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                    <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: QUALITY_COLORS[g]?.bg }} />
+                    <Typography variant="caption">
+                      {g}: {selectedQuality[`${g.toLowerCase()}_pct`]?.toFixed(1) ?? 0}%
+                    </Typography>
+                  </Box>
+                ))}
+                <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="caption" display="block">
+                    Total valores: {selectedQuality.total_values ?? '—'}
+                  </Typography>
+                  <Typography variant="caption" display="block">
+                    Últimos datos: {selectedQuality.last_data_at
+                      ? new Date(selectedQuality.last_data_at).toLocaleDateString('es-MX', {
+                          day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                        })
+                      : '—'}
+                  </Typography>
+                </Box>
+              </Box>
+            </>
+          ) : (
+            <Typography variant="body2" color="text.secondary">Cargando…</Typography>
+          )}
+        </Box>
+      </Popover>
 
       {/* ── Leyenda ── */}
       <Box sx={{ mt: 3, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>

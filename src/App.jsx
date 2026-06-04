@@ -1,7 +1,9 @@
 import { useState, useCallback, useEffect } from 'react';
 import {
-  Box, AppBar, Toolbar, Typography, Paper, Grid, Snackbar, Alert, Tabs, Tab, Badge
+  Box, AppBar, Toolbar, Typography, Paper, Grid, Snackbar, Alert, Tabs, Tab, Badge,
+  IconButton, Tooltip,
 } from '@mui/material';
+import { Settings } from '@mui/icons-material';
 import AssetTree from './components/AssetTree';
 import { NavSyncIndicator } from './components/SyncStatusIndicator';
 import { useWorkOrders } from './hooks/useWorkOrders';
@@ -15,10 +17,12 @@ import ConditionCapture from './components/condition/ConditionCapture.jsx';
 import CsvImportForm from './components/condition/CsvImportForm.jsx';
 import SourceManagementPanel from './components/condition/SourceManagementPanel.jsx';
 import DeadLetterPanel from './components/condition/DeadLetterPanel.jsx';
+import Dashboard from './components/condition/Dashboard.jsx';
 import TrendChart from './components/condition/charts/TrendChart.jsx';
 import DiagnosisPanel from './components/condition/DiagnosisPanel.jsx';
 import RulGauge from './components/condition/RulGauge.jsx';
 import RecommendationCard from './components/condition/RecommendationCard.jsx';
+import PolicyManagementPanel from './components/condition/PolicyManagementPanel.jsx';
 import { supabase } from './lib/supabaseClient';
 import './App.css';
 
@@ -29,6 +33,7 @@ function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const [conditionSubTab, setConditionSubTab] = useState(0);
+  const [showPolicyPanel, setShowPolicyPanel] = useState(false);
 
   // Índice dinámico del tab "Monitoreo de Condición" (varía según rol)
   const monitoringTabIndex = (userRole === 'PLANNER' || userRole === 'ADMIN') ? 3 : 2;
@@ -75,7 +80,7 @@ function App() {
         try {
           const pending = docs.filter((d) => !d.get('recommended_strategy'));
           setPendingCount(pending.length);
-        } catch (e) {
+        } catch {
           // ignorar
         }
       },
@@ -274,6 +279,7 @@ function App() {
                   onChange={(e, v) => setConditionSubTab(v)}
                   sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
                 >
+                  <Tab label="Dashboard" />
                   <Tab label="Captura" />
                   {(userRole === 'PLANNER' || userRole === 'ADMIN') && <Tab label="CSV" />}
                   <Tab label="Fuentes" />
@@ -281,28 +287,67 @@ function App() {
                   <Tab label="Tendencias" />
                   <Tab label="Diagnóstico" />
                 </Tabs>
+                {(userRole === 'PLANNER' || userRole === 'ADMIN') && (
+                  <Tooltip title="Administrar políticas de automatización">
+                    <IconButton
+                      size="small"
+                      color={showPolicyPanel ? 'primary' : 'default'}
+                      onClick={() => setShowPolicyPanel((p) => !p)}
+                      sx={{ ml: 1 }}
+                    >
+                      <Settings fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
                 {(() => {
-                  // Computar índice real basado en visibilidad condicional
-                  let tradIdx = -1;
+                  // Panel de políticas (override sobre sub-tabs)
+                  if (showPolicyPanel) {
+                    return <PolicyManagementPanel />;
+                  }
+
+                  // Dashboard=0 siempre; el resto corre +1
+                  const dashboardIdx = 0;
+
+                  let tradIdx;
                   let csvIdx = -1;
                   let fuentesIdx = -1;
                   let deadIdx = -1;
                   let diagIdx = -1;
 
                   if (userRole === 'PLANNER' || userRole === 'ADMIN') {
-                    // Captura=0, CSV=1, Fuentes=2, Dead-Letter=3, Tendencias=4, Diagnóstico=5
-                    csvIdx = 1;
-                    fuentesIdx = 2;
-                    deadIdx = 3;
-                    tradIdx = 4;
-                    diagIdx = 5;
+                    // Dashboard=0, Captura=1, CSV=2, Fuentes=3, Dead-Letter=4, Tendencias=5, Diagnóstico=6
+                    csvIdx = 2;
+                    fuentesIdx = 3;
+                    deadIdx = 4;
+                    tradIdx = 5;
+                    diagIdx = 6;
                   } else {
-                    // Captura=0, Fuentes=1, Tendencias=2, Diagnóstico=3
-                    fuentesIdx = 1;
-                    tradIdx = 2;
-                    diagIdx = 3;
+                    // Dashboard=0, Captura=1, Fuentes=2, Tendencias=3, Diagnóstico=4
+                    fuentesIdx = 2;
+                    tradIdx = 3;
+                    diagIdx = 4;
                   }
 
+                  if (conditionSubTab === dashboardIdx) {
+                    return (
+                      <Dashboard
+                        assetId={selectedAsset?.id || null}
+                        onNavigate={(target) => {
+                          const navMap = {
+                            diagnosis: diagIdx,
+                            fuentes: fuentesIdx,
+                            'dead-letter': deadIdx,
+                            captura: 1, // Captura siempre es índice 1
+                            recos: diagIdx,
+                          };
+                          const idx = navMap[target];
+                          if (idx != null && idx >= 0) {
+                            setConditionSubTab(idx);
+                          }
+                        }}
+                      />
+                    );
+                  }
                   if (conditionSubTab === diagIdx && diagIdx !== -1) {
                     return (
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
