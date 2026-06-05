@@ -1,0 +1,70 @@
+# SDD Configuration — CMMS Ibero
+# Generated: 2026-06-04
+# Mode: hybrid (openspec + engram)
+
+context:
+  project: cmms-frontend-react
+  description: "CMMS Ibero — Maintenance management system with offline-first architecture"
+  stack:
+    frontend: React 19 + Vite 8 + MUI v9 + Emotion
+    state: RxDB + Dexie (IndexedDB offline-first)
+    backend: Supabase (PostgreSQL + Edge Functions / Deno)
+    language: JavaScript/JSX
+    monitoring: Sentry
+  architecture:
+    - "Offline-first con RxDB/Dexie — los datos se sincronizan con Supabase cuando hay conexión"
+    - "RBAC via user_profiles + RLS policies en PostgreSQL"
+    - "ISO 14224 taxonomy para work_orders (failure_class, problem_code, cause_code, remedy_code)"
+    - "FSM lifecycle en work_orders con trigger validate_lifecycle_fsm()"
+    - "Audit trail genérico via audit_trigger_func()"
+    - "Sin Docker disponible — Edge Functions se prueban directo con deno run"
+  conventions:
+    commits: Conventional Commits (feat:, fix:, chore:, archive:, refactor:)
+    branches: Solo main (monorepo)
+    components: Funcionales React + .jsx extensions
+    state: const/let, async/await, arrow functions
+
+strict_tdd: true
+
+testing:
+  runner: vitest
+  runner_command: npm test
+  runner_watch_command: npm run test:watch
+  layers:
+    unit:
+      available: true
+      tool: Vitest + jsdom + @testing-library/react
+      config: vite.config.js (test: { environment: 'jsdom', exclude: ['tests/**'] })
+    integration:
+      available: false
+      tool: null
+    e2e:
+      available: true
+      tool: Playwright v1.59
+      config: playwright.config.js
+      command: npm run test:e2e
+  coverage:
+    available: false
+    command: null
+  quality:
+    linter:
+      available: true
+      tool: ESLint v10
+      command: npm run lint
+      plugins: react-hooks, react-refresh
+    type_checker:
+      available: false
+      tool: null
+    formatter:
+      available: false
+      tool: null
+
+phases:
+  explore: { required: true }
+  proposal: { required: true }
+  spec: { required: true }
+  design: { required: true }
+  tasks: { required: true }
+  apply: { required: true }
+  verify: { required: true }
+  archive: { required: true }

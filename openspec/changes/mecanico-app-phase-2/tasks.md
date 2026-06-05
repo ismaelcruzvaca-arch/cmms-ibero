@@ -10,7 +10,7 @@
 
 ### Phase 1: Adapter — Validation Function
 
-#### Task 1.1: Add validateCompletion to adapter
+- [x] Task 1.1: Add validateCompletion to adapter
 **File**: `src/lib/adapters/workOrderAdapter.js`
 **Action**: Modify
 **Description**: Add a pure function `validateCompletion(notes)` that validates the INPRG→COMP transition:
@@ -23,7 +23,7 @@
 
 ### Phase 2: Presenters
 
-#### Task 2.1: Create WorkOrderDetail
+- [x] Task 2.1: Create WorkOrderDetail
 **File**: `src/components/mechanic/WorkOrderDetail.jsx`
 **Action**: Create
 **Description**: Presenter component. Props: `{ workOrder: WorkOrderViewModel }`. Renders a read-only detail view using MUI Card/CardContent:
@@ -37,7 +37,7 @@
 No hooks, no data fetching. Default export.
 **Acceptance**: Renders all fields read-only; criticalityColor drives border; integrates WorkOrderStatusBadge.
 
-#### Task 2.2: Create WorkOrderNotesForm
+- [x] Task 2.2: Create WorkOrderNotesForm
 **File**: `src/components/mechanic/WorkOrderNotesForm.jsx`
 **Action**: Create
 **Description**: Presenter component. Props: `{ values, onChange, errors, lifecyclePhase }`. Renders three MUI TextField (multiline, minRows=3) in a stacked layout only when `lifecyclePhase === 'INPRG'`:
@@ -48,7 +48,7 @@ Each calls `onChange(field, value)` on input. Section labeled "Notas técnicas" 
 No hooks, no data fetching. Default export.
 **Acceptance**: Renders 3 textareas when INPRG; renders nothing for other phases; onChange fires per keystroke; error state renders red border + helperText.
 
-#### Task 2.3: Create WorkOrderActions
+- [x] Task 2.3: Create WorkOrderActions
 **File**: `src/components/mechanic/WorkOrderActions.jsx`
 **Action**: Create
 **Description**: Presenter component. Props: `{ lifecyclePhase, onAction, isSubmitting, validationErrors }`. Inspects `getAllowedTransitions(phase)` from fsm.js. Renders a single MUI Button with:
@@ -63,7 +63,7 @@ No hooks. Default export. Import `getAllowedTransitions` from `../../lib/fsm.js`
 
 ### Phase 3: Container
 
-#### Task 3.1: Create WorkOrderDrawer
+- [x] Task 3.1: Create WorkOrderDrawer
 **File**: `src/components/mechanic/WorkOrderDrawer.jsx`
 **Action**: Create
 **Description**: Container component. Props: `{ workOrder, open, onClose, onTransition }`. MUI Drawer with `anchor="right"`, `width: { xs: '100%', sm: 420 }`. Contains:
@@ -98,7 +98,7 @@ Import: `validateCompletion` from adapter, `getAllowedTransitions` from fsm.js.
 Default export.
 **Acceptance**: Opens as overlay with dark backdrop; shows all components; validation blocks INPRG→COMP; success closes drawer; errors show inline.
 
-#### Task 3.2: Wire into MechanicDashboard
+- [x] Task 3.2: Wire into MechanicDashboard
 **File**: `src/pages/MechanicDashboard.jsx`
 **Action**: Modify
 **Description**: Add draw state management:

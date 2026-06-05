@@ -2,271 +2,268 @@
 
 ## Purpose
 
-Define the structured checklist system that captures field evidence (PASS/FAIL + causa_falla) from work order execution and feeds it into the Competency Engine. This is the raw input layer — templates define what to check, sampling reduces click fatigue, and a trigger converts completed checklists into skill evidence.
+Define the structured checklist system that captures field evidence (PASS/FAIL + causa_falla) from work order execution and feeds qualified evidence into the Competency Engine. Resolves the 3 Blind Spots: (1) **causa_falla** — why it failed, not just that it failed; (2) **evaluator_source** — who evaluates determines evidence weight; (3) **sampling** — click fatigue via deterministic sampling per module+block.
 
-## Requirements
+---
+
+## Capability: Checklist Evidence
 
 ### Requirement: Causa Falla Catalog
 
-The system MUST maintain a fixed catalog of 6 failure-cause codes. The catalog SHALL be seeded by migration and SHALL NOT be user-editable (ADMIN-only CRUD for future expansion).
+The system MUST maintain a fixed catalog of 6 failure-cause codes seeded by migration (ADMIN-only CRUD for future expansion).
 
-| Code | Description |
-|------|-------------|
-| BRECHA_CONOCIMIENTO | Knowledge gap — technician lacks skill/knowledge |
-| FALTA_HERRAMIENTA | Missing tool or equipment |
-| DESVIACION_DISCIPLINARIA | Procedure not followed (disciplinary) |
-| FALTA_REPUESTO | Missing spare part |
-| ERROR_DOCUMENTACION | Documentation error (LUP, standard, diagram) |
-| NO_APLICA | Item not applicable in this context (neutro for competency) |
+| Code | Name | Description |
+|------|------|-------------|
+| BRECHA_CONOCIMIENTO | Brecha de Conocimiento | Technician lacks skill — triggers training |
+| FALTA_HERRAMIENTA | Falta de Herramienta | Specialized tool missing/damaged — triggers purchase |
+| DESVIACION_DISCIPLINARIA | Desviación Disciplinaria | Technician skipped step intentionally — triggers admin action |
+| FALTA_REPUESTO | Falta de Repuesto | Spare part missing/defective — triggers purchasing audit |
+| ERROR_DOCUMENTACION | Error de Documentación | SOP/LUP outdated or wrong — triggers standard revision |
+| NO_APLICA | No Aplica | Step optional per order context — neutral for competency |
+
+**Schema**:
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, DEFAULT gen_random_uuid() |
+| code | TEXT | UNIQUE NOT NULL |
+| name | TEXT | NOT NULL |
+| description | TEXT | |
 
 #### Scenario: Seed causes after migration
 
-- GIVEN the migration has been applied
-- WHEN querying `causa_falla_catalog`
-- THEN exactly 6 rows exist with the codes above
+```
+GIVEN the migration has been applied
+WHEN querying causa_falla_catalog
+THEN exactly 6 rows exist with the codes above
+```
 
 #### Scenario: NO_APLICA is neutro
 
-- GIVEN a checklist item response with `causa_falla_id = NO_APLICA`
-- WHEN the trigger feeds evidence to technician_skill_evidence
-- THEN the evidence SHALL be recorded as PASS (status=true) regardless of the item status — NO_APLICA overrides FAIL
+```
+GIVEN a checklist item response with status='FAIL' and causa_falla_id = NO_APLICA
+WHEN trg_checklist_to_evidence fires
+THEN the evidence SHALL be recorded as PASS (status=true)
+AND the NO_APLICA causa_falla_id SHALL be preserved for traceability
+```
 
 ### Requirement: Checklist Template Definition
 
-The system MUST define checklist templates per technological module, with optional override per job_plan.
+Templates per technological module, with optional override per `job_plan`. Each module+block combination allows exactly one default template and optionally one per job_plan.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | id | UUID | PK, DEFAULT gen_random_uuid() |
-| module_id | UUID | FK → technological_modules(id) |
+| code | TEXT | UNIQUE NOT NULL (e.g. CHK-MPACK-A-001) |
+| description | TEXT | NOT NULL |
+| module_id | UUID | NOT NULL FK → technological_modules(id) |
 | job_plan_id | UUID | FK → job_plans(id), NULLABLE |
-| block | TEXT | NOT NULL, CHECK IN ('A', 'B', 'C') |
-| title | TEXT | NOT NULL |
-| description | TEXT | NULLABLE |
+| block_type | TEXT | NOT NULL CHECK IN ('A', 'B', 'C') |
+| sampling_rate | INT | DEFAULT 1, CHECK (0–100) |
+| is_auditable | BOOLEAN | DEFAULT false |
 | is_active | BOOLEAN | DEFAULT true |
 | created_at | TIMESTAMPTZ | DEFAULT NOW() |
+| updated_at | TIMESTAMPTZ | DEFAULT NOW() |
 
-Unique constraint: `UNIQUE(module_id, job_plan_id, block)` where `job_plan_id IS NOT NULL`; for module-wide templates, `UNIQUE(module_id, block)` where `job_plan_id IS NULL`.
+Unique partial indexes:
+- `(module_id, block_type) WHERE job_plan_id IS NULL`
+- `(module_id, job_plan_id, block_type) WHERE job_plan_id IS NOT NULL`
+
+**Block types**: A (Safety/LOTO → level 2), B (Execution → level 3), C (Precision → level 4).
+
+**Sampling**: `1` = always, `3` = 1 of every 3 WOs, `0` = only if WO is auditable.
 
 #### Scenario: Module-wide template created
 
-- GIVEN a PLANNER creates a template for M-PACK, Block A, with no job_plan
-- WHEN the template is inserted
-- THEN it applies to ALL work orders in M-PACK that have no job_plan-specific override
+```
+GIVEN a PLANNER creates a template for M-PACK Block A with no job_plan
+WHEN resolving templates for a WO in M-PACK
+THEN it applies to ALL work orders in M-PACK that have no job_plan-specific override
+```
 
 #### Scenario: Job-plan override takes priority
 
-- GIVEN a module-wide template exists for M-PACK Block A
-- AND a job_plan-specific template exists for the same module+block
-- WHEN resolving templates for a work order with that job_plan
-- THEN the job_plan-specific template SHALL be used (not the module-wide one)
+```
+GIVEN a module-wide template exists for M-PACK Block A
+AND a job_plan-specific template exists for the same module+block
+WHEN resolving templates for a WO with that job_plan
+THEN the job_plan-specific template SHALL be used
+```
 
 ### Requirement: Checklist Template Items
 
-Each template SHALL have ordered items with configurable metadata.
+Ordered items per template with configurable response type and evidence requirements.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | id | UUID | PK, DEFAULT gen_random_uuid() |
-| template_id | UUID | FK → checklist_templates(id) ON DELETE CASCADE |
+| checklist_template_id | UUID | NOT NULL FK → checklist_templates(id) ON DELETE CASCADE |
 | step_sequence | INT | NOT NULL |
 | item_text | TEXT | NOT NULL |
-| item_type | TEXT | NOT NULL DEFAULT 'safety', CHECK IN ('safety', 'procedure', 'quality', 'precision') |
+| item_type | TEXT | DEFAULT 'PASS_FAIL', CHECK IN ('PASS_FAIL', 'MEASUREMENT', 'YES_NO', 'TEXT') |
 | requires_photo | BOOLEAN | DEFAULT false |
 | requires_comment | BOOLEAN | DEFAULT false |
 | optional | BOOLEAN | DEFAULT false |
+| UNIQUE | (checklist_template_id, step_sequence) | |
 
-Unique constraint: `UNIQUE(template_id, step_sequence)`.
+**Item types**: `PASS_FAIL` (binary pass/fail), `MEASUREMENT` (numeric value), `YES_NO` (boolean), `TEXT` (free text comment).
 
-#### Scenario: Ordered items resolved by step_sequence
+#### Scenario: Items resolved by step_sequence
 
-- GIVEN a template with 5 items at step_sequence 1-5
-- WHEN the Focus Mode loads items
-- THEN items SHALL display in ascending step_sequence order (1 → 5)
+```
+GIVEN a template with items at step_sequence 1-5
+WHEN Focus Mode loads items
+THEN items SHALL display in ascending step_sequence order
+```
 
-#### Scenario: Optional item skipped does not block
+#### Scenario: Optional item skipped
 
-- GIVEN an item with `optional=true`
-- WHEN the technician skips it (no PASS/FAIL selected)
-- THEN the checklist SHALL still be submittable
-- AND skipped optional items SHALL NOT be recorded in checklist_item_responses
-
-### Requirement: Sampling Configuration
-
-The system MUST define sampling rates per module+block pair to control which work orders require checklists.
-
-| Column | Type | Constraints |
-|--------|------|-------------|
-| id | UUID | PK, DEFAULT gen_random_uuid() |
-| module_id | UUID | FK → technological_modules(id) |
-| block | TEXT | NOT NULL, CHECK IN ('A', 'B', 'C') |
-| sampling_rate | INT | NOT NULL, CHECK (sampling_rate BETWEEN 1 AND 100), DEFAULT 100 |
-| is_active | BOOLEAN | DEFAULT true |
-
-Unique constraint: `UNIQUE(module_id, block)`. Rate `100` means always sample (deterministic hash always matches). Rate `0` means never sample.
-
-#### Scenario: Sampling rate 100 means always
-
-- GIVEN `sampling_rate = 100` for M-PACK Block A
-- WHEN resolving templates for any work order in M-PACK
-- THEN the Block A template SHALL always apply
-
-#### Scenario: Sampling rate 0 means never
-
-- GIVEN `sampling_rate = 0` for M-PACK Block C
-- WHEN resolving templates for any work order in M-PACK
-- THEN the Block C template SHALL never apply
-
-#### Scenario: Deterministic hash sampling
-
-- GIVEN `sampling_rate = 20` for M-PACK Block B
-- WHEN resolving templates for work order WO-001 and WO-002
-- THEN `(hash(wo.id || template.id) % 100) < 20` determines inclusion
-- AND the same work order SHALL always get the same result (deterministic)
-
-### Requirement: Block C Visibility Gate
-
-Block C checklists SHALL only be visible when the assigned technician has `current_level >= 3` in the work order's module.
-
-#### Scenario: Level below 3 hides Block C
-
-- GIVEN a work order in module M-PACK
-- AND the assigned technician has `current_level = 2` in M-PACK
-- WHEN resolving templates at WO open time
-- THEN Block C template SHALL NOT be applied (invisible)
-
-#### Scenario: Level 3 or above shows Block C
-
-- GIVEN a work order in module M-PACK
-- AND the assigned technician has `current_level >= 3` in M-PACK
-- WHEN resolving templates at WO open time
-- THEN Block C template SHALL be applied (if sampling matches)
+```
+GIVEN an item with optional=true
+WHEN the technician skips it
+THEN the checklist SHALL still be submittable
+AND skipped optional items SHALL NOT be recorded in checklist_item_responses
+```
 
 ### Requirement: Checklist Instances
 
-Each completed checklist becomes an instance recording who evaluated, using what trust model, and optionally who verified.
+Runtime instance per template per work order. Created at WO open time. Completion triggers evidence feeding.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | id | UUID | PK, DEFAULT gen_random_uuid() |
 | work_order_id | TEXT | NOT NULL FK → work_orders(id) |
+| checklist_template_id | UUID | NOT NULL FK → checklist_templates(id) |
 | technician_id | UUID | NOT NULL FK → user_profiles(id) |
-| template_id | UUID | NOT NULL FK → checklist_templates(id) |
 | asset_id | TEXT | NOT NULL FK → assets(id) |
-| evaluator_source | TEXT | NOT NULL, CHECK IN ('SELF', 'SUPERVISOR', 'PEER'), DEFAULT 'SELF' |
-| verified_by | UUID | NULLABLE FK → user_profiles(id) |
-| status | TEXT | NOT NULL, CHECK IN ('IN_PROGRESS', 'COMPLETED', 'VOID') |
+| evaluator_source | TEXT | NOT NULL DEFAULT 'SELF', CHECK IN ('SELF', 'SUPERVISOR', 'PEER') |
+| evaluated_by | UUID | NOT NULL DEFAULT auth.uid(), FK → user_profiles(id) |
+| verified_by | UUID | FK → user_profiles(id) |
+| verified_at | TIMESTAMPTZ | |
+| status | TEXT | NOT NULL DEFAULT 'IN_PROGRESS', CHECK IN ('IN_PROGRESS', 'COMPLETED', 'VOID') |
 | started_at | TIMESTAMPTZ | DEFAULT NOW() |
-| completed_at | TIMESTAMPTZ | NULLABLE |
+| completed_at | TIMESTAMPTZ | |
+| notes | TEXT | |
+| created_at | TIMESTAMPTZ | DEFAULT NOW() |
+
+**evaluator_source** determines trust: SELF=0.5, PEER=0.8, SUPERVISOR=1.0.
 
 #### Scenario: Technician starts a checklist
 
-- GIVEN a technician opens Focus Mode for a work order
-- WHEN the template is resolved
-- THEN a checklist_instance SHALL be created with status='IN_PROGRESS'
+```
+GIVEN a technician opens Focus Mode for a WO
+WHEN the template is resolved
+THEN a checklist_instance SHALL be created with status='IN_PROGRESS'
+```
 
-#### Scenario: SELF evaluator gets trust=0.5
+#### Scenario: Completed instance triggers evidence
 
-- GIVEN a checklist_instance with `evaluator_source='SELF'`
-- WHEN `trg_checklist_to_evidence` fires
-- THEN each evidence row SHALL have `trust_score=0.5`
+```
+GIVEN a checklist_instance is COMPLETED with 2 PASS and 1 FAIL with FALTA_HERRAMIENTA
+WHEN trg_checklist_to_evidence fires (AFTER UPDATE)
+THEN ONE row SHALL be inserted into technician_skill_evidence
+AND status SHALL be false (because at least one FAIL exists)
+AND causa_falla_id SHALL be the FIRST FAIL's causa_falla
+```
 
-#### Scenario: SUPERVISOR evaluator gets trust=1.0
+#### Scenario: NO_APLICA overrides FAIL to PASS
 
-- GIVEN a checklist_instance with `evaluator_source='SUPERVISOR'`
-- WHEN `trg_checklist_to_evidence` fires
-- THEN each evidence row SHALL have `trust_score=1.0`
-
-#### Scenario: PEER evaluator gets trust=0.8
-
-- GIVEN a checklist_instance with `evaluator_source='PEER'`
-- WHEN `trg_checklist_to_evidence` fires
-- THEN each evidence row SHALL have `trust_score=0.8`
+```
+GIVEN a checklist_instance has ALL items FAIL + NO_APLICA
+WHEN trg_checklist_to_evidence fires
+THEN the evidence row SHALL have status=true (aggregate PASS)
+AND causa_falla_id = the NO_APLICA record's causa_falla_id
+```
 
 ### Requirement: Checklist Item Responses
 
-Individual item results within a checklist instance.
+Individual item results within an instance.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | id | UUID | PK, DEFAULT gen_random_uuid() |
 | checklist_instance_id | UUID | NOT NULL FK → checklist_instances(id) ON DELETE CASCADE |
 | template_item_id | UUID | NOT NULL FK → checklist_template_items(id) |
-| status | TEXT | NOT NULL, CHECK IN ('PASS', 'FAIL') |
-| causa_falla_id | UUID | NULLABLE FK → causa_falla_catalog(id) |
-| photo_url | TEXT | NULLABLE |
-| comment | TEXT | NULLABLE |
-| responded_at | TIMESTAMPTZ | DEFAULT NOW() |
-
-NOTE: `causa_falla_id` MUST NOT be NULL when `status='FAIL'` — enforced at insert by trigger or application logic.
+| status | TEXT | NOT NULL CHECK IN ('PASS', 'FAIL', 'NA', 'SKIPPED') |
+| causa_falla_id | UUID | FK → causa_falla_catalog(id) |
+| comment | TEXT | |
+| photo_url | TEXT | |
+| measurement_value | NUMERIC | |
+| answered_at | TIMESTAMPTZ | DEFAULT NOW() |
+| UNIQUE | (checklist_instance_id, template_item_id) | |
 
 #### Scenario: FAIL requires causa_falla
 
-- GIVEN a technician sets an item to FAIL
-- WHEN submitting the checklist
-- THEN `causa_falla_id` MUST be provided
-- AND submission SHALL be rejected if causa_falla is missing for a FAIL
+```
+GIVEN a technician sets an item to FAIL
+WHEN submitting the checklist
+THEN causa_falla_id MUST be provided
+AND the submission SHOULD be validated client-side before sending
+```
 
-#### Scenario: PASS with optional causa_falla
+### Requirement: Sampling Configuration
 
-- GIVEN a technician sets an item to PASS
-- WHEN submitting the checklist
-- THEN `causa_falla_id` MAY be NULL (not required for PASS)
+Global override for sampling rates per module+block, without modifying templates.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, DEFAULT gen_random_uuid() |
+| module_id | UUID | FK → technological_modules(id) |
+| job_plan_id | UUID | FK → job_plans(id) |
+| block_type | TEXT | NOT NULL CHECK IN ('A', 'B', 'C') |
+| default_sampling_rate | INT | DEFAULT 1, CHECK (0–100) |
+| is_auditable_only | BOOLEAN | DEFAULT false |
+| is_active | BOOLEAN | DEFAULT true |
+| UNIQUE | (module_id, job_plan_id, block_type) | |
+
+#### Scenario: Sampling config overrides template
+
+```
+GIVEN a template has sampling_rate=3
+AND a sampling_config exists for that module+block with default_sampling_rate=10
+WHEN resolving sampling for a WO
+THEN effective_rate = 10 (config overrides template)
+```
 
 ### Requirement: Trigger trg_checklist_to_evidence
 
-The system MUST provide `trg_checklist_to_evidence` (AFTER UPDATE ON checklist_instances WHEN status='COMPLETED') that converts completed checklist item responses into `technician_skill_evidence` rows.
+SECURITY DEFINER function on `checklist_instances` AFTER UPDATE WHEN `NEW.status = 'COMPLETED'`.
 
-Mapping rules:
-- Each item_response with `status='PASS'` → `technician_skill_evidence.status=true`
-- Each item_response with `status='FAIL'` → `technician_skill_evidence.status=false`
-- `modulo_gema` resolved from template → module
-- `nivel_evaluado`: Block A=2, Block B=3, Block C=4
-- `evaluation_source`, `trust_score` from checklist_instances
-- `causa_falla_id` from item_response
-- Items with `causa_falla = NO_APLICA` SHALL be recorded as PASS (status=true)
+**Aggregation logic**:
+- Iterates all item responses for the completed instance
+- If ANY item has `status='FAIL'` AND `causa_falla_code != 'NO_APLICA'` → evidence `status=false`
+- If ALL FAILs are NO_APLICA → evidence `status=true` (override)
+- Uses the FIRST non-null `causa_falla_id` found across responses
+- Block→nivel mapping: A→2, B→3, C→4
+- trust_score from evaluator_source: SELF=0.5, PEER=0.8, SUPERVISOR=1.0
+- Inserts ONE aggregated row per instance
 
-#### Scenario: Completed checklist feeds evidence
+#### Scenario: Aggregated evidence
 
-- GIVEN a checklist_instance with 3 items (2 PASS, 1 FAIL with FALTA_HERRAMIENTA)
-- WHEN status transitions to 'COMPLETED'
-- THEN 3 rows SHALL be inserted into technician_skill_evidence
-- AND the FAIL row SHALL have `status=false` and `causa_falla_id=FALTA_HERRAMIENTA`
-
-#### Scenario: NO_APLICA overrides FAIL
-
-- GIVEN a checklist item_response with `status='FAIL'` and `causa_falla_id=NO_APLICA`
-- WHEN the trigger fires
-- THEN the evidence row SHALL have `status=true` (PASS)
-- AND `causa_falla_id=NO_APLICA`
+```
+GIVEN a Block B checklist with 12 items (10 PASS, 2 FAIL with BRECHA_CONOCIMIENTO)
+WHEN trg_checklist_to_evidence fires
+THEN 1 row inserted into technician_skill_evidence
+AND status = false (at least one real FAIL)
+AND nivel_evaluado = 3 (Block B)
+AND trust_score = evaluator_source mapping
+```
 
 ### Requirement: Row Level Security
 
-The system MUST enforce RLS on all new tables.
+The system MUST enforce RLS on all 6 new tables.
 
 | Table | TECHNICIAN | PLANNER | ADMIN |
 |-------|-----------|---------|-------|
 | causa_falla_catalog | SELECT | SELECT | ALL |
 | checklist_templates | SELECT | INSERT/SELECT/UPDATE | ALL |
 | checklist_template_items | SELECT | INSERT/SELECT/UPDATE | ALL |
-| checklist_instances | INSERT (own), SELECT (own), UPDATE (own) | ALL | ALL |
-| checklist_item_responses | INSERT (own), SELECT (own) | ALL | ALL |
 | checklist_sampling_config | SELECT | SELECT/UPDATE | ALL |
+| checklist_instances | SELECT/INSERT/UPDATE (own) | ALL | ALL |
+| checklist_item_responses | SELECT/INSERT | ALL | ALL |
 
-#### Scenario: TECHNICIAN inserts own checklist
+Pattern: `get_user_role()` determines access. TECHNICIAN restricted to own instances via `technician_id = auth.uid()`.
 
-- GIVEN a TECHNICIAN is authenticated
-- WHEN they INSERT a checklist_instance with their own `technician_id`
-- THEN the row SHALL be created successfully
+### Requirement: Audit Triggers
 
-#### Scenario: TECHNICIAN cannot read another's checklist
-
-- GIVEN a TECHNICIAN is authenticated
-- WHEN they SELECT a checklist_instance where `technician_id != auth.uid()`
-- THEN the row SHALL NOT be returned (RLS filter)
-
-#### Scenario: PLANNER reads all checklists
-
-- GIVEN a PLANNER is authenticated
-- WHEN they SELECT checklist_instances
-- THEN ALL rows SHALL be returned regardless of technician_id
+`checklist_instances` and `checklist_item_responses` MUST have audit triggers using the existing `audit_trigger_func()` for INSERT, UPDATE, DELETE operations.

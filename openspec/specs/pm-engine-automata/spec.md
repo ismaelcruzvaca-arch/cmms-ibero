@@ -76,6 +76,52 @@ The system MUST provide a function that scans `pm_schedules`, finds overdue entr
 - THEN the schedule's `next_target_date` is updated to `2026-05-01 + 30 days`
 - AND `last_completion_date` is set to `NOW()`
 
+### Requirement: Clone job_plan_labor on WO Generation
+
+The `generate_due_preventive_work_orders()` function MUST clone `job_plan_labor` rows into `work_order_labor_estimates` when generating a preventive WO from a job plan.
+
+#### Scenario: Labor estimates cloned to WO
+
+- GIVEN a job plan with labor rows: ELECTRICIAN 2h × 1 head_count, MECHANIC 1h × 2 head_count
+- WHEN `generate_due_preventive_work_orders()` creates a WO from this plan
+- THEN `work_order_labor_estimates` SHALL contain two rows with matching trade, estimated_hours, and head_count, linked to the new WO
+
+### Requirement: Clone job_plan_safety on WO Generation
+
+The function MUST clone `job_plan_safety` rows into `work_order_safety_requirements` when generating a preventive WO.
+
+#### Scenario: Safety requirements cloned to WO
+
+- GIVEN a job plan with safety rows: LOTO, PTW
+- WHEN a WO is generated
+- THEN `work_order_safety_requirements` SHALL contain LOTO and PTW rows with the same safety_type, description, and is_mandatory, linked to the new WO
+
+### Requirement: Attach Checklist Templates on WO Generation
+
+The function MUST instantiate `checklist_templates` into `checklist_instances` in PENDING status when generating a preventive WO.
+
+#### Scenario: Plan-level checklist instantiated
+
+- GIVEN a checklist_template with job_plan_task_id=NULL linked to a job plan
+- WHEN a WO is generated
+- THEN a checklist_instance SHALL be created with status='PENDING', linked to the WO
+
+#### Scenario: Task-level checklist templates excluded
+
+- GIVEN a checklist_template with job_plan_task_id set (task-specific) and matching asset module
+- WHEN a WO is generated
+- THEN NO checklist_instance is created from that template — only plan-level templates (job_plan_task_id IS NULL) are cloned
+
+### Requirement: Set Work Order Estimated Costs
+
+The function MUST set `work_order.estimated_hours`, `work_order.estimated_parts_cost`, and `work_order.estimated_labor_cost` based on the cloned data.
+
+#### Scenario: Estimated costs computed from cloned data
+
+- GIVEN a job plan with 1 ELECTRICIAN × 2h, materials planned_qty=3 × unit_cost=10
+- WHEN a WO is generated
+- THEN work_order.estimated_hours = 2, estimated_parts_cost = 30, estimated_labor_cost = 2 × default_rate
+
 ## Non-Functional Requirements
 
 - **Idempotency**: The function MUST be safe to call repeatedly — calling it twice on the same data SHALL NOT generate duplicate work orders for already-processed schedules
@@ -96,4 +142,10 @@ The system MUST provide a function that scans `pm_schedules`, finds overdue entr
 - [ ] Empty schedules — no due dates → function returns 0
 - [ ] NULL time_frequency_days — schedule processed (NULLS LAST)
 - [ ] Fixed-clock recalculation — `next_target_date` advances by frequency from previous target
+- [ ] Labor cloning — `work_order_labor_estimates` populated from `job_plan_labor` on WO generation
+- [ ] Safety cloning — `work_order_safety_requirements` populated from `job_plan_safety` on WO generation
+- [ ] Checklist attachment — `checklist_instances` created in PENDING status from matching `checklist_templates`, task-level templates excluded
+- [ ] Cost calculation — `estimated_hours`, `estimated_parts_cost`, `estimated_labor_cost` set from cloned snapshot data
+- [ ] System user seed (`00000000-0000-0000-0000-000000000000`) exists in auth.users and user_profiles
+- [ ] No regression on material inheritance or hierarchical suppression from the original function
 - [ ] Function tested via pgTAP — 7 tests, 14 assertions

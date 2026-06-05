@@ -77,6 +77,8 @@ reported_at, approved_at, planned_start_at, actual_start_at, completed_at, close
 | created_at | TIMESTAMPTZ | DEFAULT NOW() |
 | created_by | UUID | Nullable, references auth.users |
 | updated_at | TIMESTAMPTZ | DEFAULT NOW() |
+| is_auditable | BOOLEAN | NOT NULL DEFAULT false |
+| audit_reason | TEXT | Nullable |
 
 **REMOVED columns** (no longer exist in the schema): `status`, `description`, `actual_hours`, `cost_estimate`, `actual_cost`, `percentage_complete`, `_conflict`, `_deleted`.
 
@@ -200,7 +202,9 @@ work_orders
 ├── [4 failure taxonomy codes] VARCHAR
 ├── [3 operational context fields] VARCHAR
 ├── [3 structured notes] TEXT
-└── created_at / created_by / updated_at
+├── created_at / created_by / updated_at
+├── is_auditable BOOLEAN
+└── audit_reason TEXT
 
 audit_logs
 ├── id UUID PK

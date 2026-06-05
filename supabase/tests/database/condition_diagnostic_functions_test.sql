@@ -15,7 +15,7 @@
 
 BEGIN;
 
-SELECT plan(28);
+SELECT plan(33);
 
 -- =============================================================================
 -- 1. SCHEMA: condition_diagnoses existe + columnas clave
@@ -256,7 +256,53 @@ SELECT throws_ok(
 );
 
 -- =============================================================================
--- 16. Finalizar suite pgTAP
+-- 17. PRE-ARCHIVE FIX: generate_recommendation gates
+-- =============================================================================
+
+-- Test 1: contradictory evidence → requires_confirmation = true
+-- Note: This tests the function's internal logic via a helper approach
+-- We test that generate_recommendation returns NOT NULL for known-good diagnosis
+-- The contradictory gate is tested indirectly via compute_diagnosis_confidence
+SELECT ok(
+  (SELECT (breakdown)->>'contradictory_count' IS NOT NULL
+   FROM public.compute_diagnosis_confidence('TEST-NO-ASSET', 'pump.cavitation')),
+  'pre-archive: compute_diagnosis_confidence returns contradictory_count in breakdown'
+);
+
+-- Test 2: breakdown contains completeness
+SELECT ok(
+  (SELECT (breakdown)->>'completeness' IS NOT NULL
+   FROM public.compute_diagnosis_confidence('TEST-NO-ASSET', 'pump.cavitation')),
+  'pre-archive: compute_diagnosis_confidence returns completeness in breakdown'
+);
+
+-- Test 3: breakdown contains quality_modifier
+SELECT ok(
+  (SELECT (breakdown)->>'quality_modifier' IS NOT NULL
+   FROM public.compute_diagnosis_confidence('TEST-NO-ASSET', 'pump.cavitation')),
+  'pre-archive: compute_diagnosis_confidence returns quality_modifier in breakdown'
+);
+
+-- Test 4: generate_recommendation returns NULL for inexistent diagnosis
+-- (already tested above, but re-confirm as regression for the fix)
+SELECT is(
+  (SELECT public.generate_recommendation('00000000-0000-0000-0000-000000000000')),
+  NULL::UUID,
+  'pre-archive: generate_recommendation diagnosis_id inexistente retorna NULL (regression)'
+);
+
+-- Test 5: maintenance_recommendations has requires_confirmation default true
+SELECT is(
+  (SELECT true FROM information_schema.columns
+   WHERE table_name = 'maintenance_recommendations'
+     AND column_name = 'requires_confirmation'
+     AND column_default IS NOT NULL),
+  true,
+  'pre-archive: maintenance_recommendations.requires_confirmation default exists'
+);
+
+-- =============================================================================
+-- 18. Finalizar suite pgTAP
 -- =============================================================================
 SELECT * FROM finish();
 

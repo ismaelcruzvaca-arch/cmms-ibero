@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "@cmms/pdf-engine": "../../../packages/pdf-engine/mod.ts",
+    "@supabase/supabase-js": "jsr:@supabase/supabase-js@2",
+    "@std/assert": "jsr:@std/assert"
+  }
+}

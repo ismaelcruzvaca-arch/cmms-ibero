@@ -20,6 +20,8 @@ import WorkOrderNotesForm from './WorkOrderNotesForm.jsx';
 import WorkOrderActions from './WorkOrderActions.jsx';
 import LaborClockWidget from './LaborClockWidget.jsx';
 import HtmlReportPreview from '../pdf/HtmlReportPreview.jsx';
+import PdfDownloadButton from '../pdf/PdfDownloadButton.jsx';
+import PdfEmailButton from '../pdf/PdfEmailButton.jsx';
 import { useReport } from '../../hooks/useReport.js';
 import { validateCompletion } from '../../lib/adapters/workOrderAdapter.js';
 import { initRxDB } from '../../lib/rxdb.js';
@@ -244,13 +246,27 @@ export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition
           </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {/* Imprimir OT — solo visible cuando la OT está completada o cerrada */}
+            {/* Descargar PDF + Imprimir OT — solo visible cuando la OT está completada o cerrada */}
             {['COMP', 'CLOSED'].includes(workOrder.lifecyclePhase) && (
-              <Tooltip title="Imprimir orden de trabajo">
-                <IconButton onClick={handlePrintClick} size="small" color="primary">
-                  <PrintIcon />
-                </IconButton>
-              </Tooltip>
+              <>
+                <PdfDownloadButton
+                  templateCode="ot-default"
+                  recordId={workOrder.id}
+                  recordType="work_order"
+                  variant="icon"
+                  size="small"
+                />
+                <PdfEmailButton
+                  templateCode="ot-default"
+                  recordId={workOrder.id}
+                  recordType="work_order"
+                />
+                <Tooltip title="Imprimir orden de trabajo">
+                  <IconButton onClick={handlePrintClick} size="small" color="primary">
+                    <PrintIcon />
+                  </IconButton>
+                </Tooltip>
+              </>
             )}
             <IconButton onClick={onClose} disabled={isSubmitting} size="small">
               <CloseIcon />

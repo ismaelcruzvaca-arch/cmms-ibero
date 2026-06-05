@@ -730,6 +730,18 @@ function createLaborPullHandler(tableName, orderField = 'updated_at') {
   };
 }
 
+// ── Report Templates Push (no-op) ──
+// Los writes van directo a Supabase vía useTemplates hook.
+// RxDB pull replica automáticamente los cambios.
+// Registramos el handler para que RxDB sepa que la colección acepta push,
+// pero no realiza ninguna operación — evita duplicar writes.
+export function createReportTemplatePushHandler() {
+  return async (docs) => {
+    console.log('[RxDB Sync] Push report_templates: no-op (writes bypass RxDB)');
+    return [];
+  };
+}
+
 // ── Labor Records Push ──
 function createLaborPushHandler(tableName) {
   return async (docs) => {
@@ -975,14 +987,15 @@ export async function startAllReplications(db) {
   // ── Condition Monitoring Replications (SDD 2) ──
   startConditionReplications(db);
 
-  // ── PDF Report Engine Replications ──
-  // report_templates (pull-only — los templates se crean desde Supabase)
+    // ── PDF Report Engine Replications ──
+  // report_templates (push no-op — writes bypass RxDB vía useTemplates hook)
   replicationStates.report_templates = replicateRxCollection({
     collection: db.report_templates,
     replicationIdentifier: 'cmms-rt-sync',
     live: true,
     retryTime: 5000,
-    pull: { handler: createPullHandler('report_templates', 'updated_at') }
+    pull: { handler: createPullHandler('report_templates', 'updated_at') },
+    push: { handler: createReportTemplatePushHandler() }
   });
 
   // report_history (pull + push — audit trail)
@@ -1054,6 +1067,10 @@ function getPushHandler(collectionName) {
       'recommended_strategy', 'failure_cause', 'mitigation_actions', 'recommended_frequency',
       'analyzed_by', 'notes', 'created_at', 'updated_at'
     ]);
+  }
+
+  if (collectionName === 'report_templates') {
+    return createReportTemplatePushHandler();
   }
 
   if (collectionName === 'report_history') {

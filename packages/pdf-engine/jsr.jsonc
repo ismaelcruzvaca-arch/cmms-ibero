@@ -1,0 +1,8 @@
+{
+  "name": "@cmms/pdf-engine",
+  "version": "0.1.0",
+  "exports": "./mod.ts",
+  "publish": {
+    "include": ["mod.ts", "templateEngine.js", "templateDefaults.js", "README.md", "LICENSE", "deno.json"]
+  }
+}

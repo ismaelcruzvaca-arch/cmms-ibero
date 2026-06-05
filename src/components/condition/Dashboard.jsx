@@ -35,7 +35,7 @@ import {
   Assignment,
   Assessment,
   SignalWifiOff,
-  DeleteOutline,
+  DeleteOutlined,
   Feedback,
   Build,
   Refresh,
@@ -545,7 +545,7 @@ export default function Dashboard({ assetId, onNavigate }) {
         {/* Dead Letters */}
         <Grid size={{ xs: 12, sm: 6, md: 4 }}>
           <MetricTile
-            icon={<DeleteOutline />}
+            icon={<DeleteOutlined />}
             label="Dead Letters"
             value={metrics.deadLetterCount}
             color={getDeadLetterColor(metrics.deadLetterCount)}

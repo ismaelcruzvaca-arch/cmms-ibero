@@ -6,20 +6,62 @@
  *  - Estado vacío: "Sin diagnósticos activos"
  *  - Estado loading: "Cargando diagnósticos…"
  *  - Estado error
+ *  - Botón "Generar Recomendación" (reemplaza "Generar OT")
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 
-// ─── Mock useDiagnoses ──────────────────────────────────────────
-const { mockUseDiagnoses } = vi.hoisted(() => {
-  return { mockUseDiagnoses: vi.fn() };
+// ─── Stub env vars + mock supabase ──────────────────────────────
+const { mockUseDiagnoses, mockSupabaseChain } = vi.hoisted(() => {
+  const chain = {
+    select: vi.fn(),
+    eq: vi.fn(),
+    in: vi.fn(),
+    order: vi.fn(),
+    maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+  };
+  chain.select.mockReturnValue(chain);
+  chain.eq.mockReturnValue(chain);
+  chain.in.mockReturnValue(chain);
+  chain.order.mockReturnValue(chain);
+
+  process.env.VITE_SUPABASE_URL = 'http://localhost:54321';
+  process.env.VITE_SUPABASE_ANON_KEY = 'test-anon-key';
+
+  return {
+    mockUseDiagnoses: vi.fn(),
+    mockSupabaseChain: chain,
+  };
 });
 
 vi.mock('../../../hooks/useDiagnoses', () => ({
   default: (...args) => mockUseDiagnoses(...args),
   useDiagnoses: (...args) => mockUseDiagnoses(...args),
 }));
+
+vi.mock('../../../lib/supabaseClient', () => {
+  const chain = {
+    select: vi.fn(),
+    eq: vi.fn(),
+    in: vi.fn(),
+    order: vi.fn(),
+    maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+  };
+  chain.select.mockReturnValue(chain);
+  chain.eq.mockReturnValue(chain);
+  chain.in.mockReturnValue(chain);
+  chain.order.mockReturnValue(chain);
+
+  return {
+    supabase: {
+      from: vi.fn(() => chain),
+      rpc: chain.rpc,
+    },
+  };
+});
 
 import DiagnosisPanel from '../DiagnosisPanel';
 
@@ -119,15 +161,15 @@ describe('DiagnosisPanel', () => {
 
     expect(screen.getByText('Cavitación de Bomba')).toBeTruthy();
     expect(screen.getByText('Activo')).toBeTruthy();
-    expect(screen.getByText('Generar OT')).toBeTruthy();
+    expect(screen.getByText('Generar Recomendación')).toBeTruthy();
   });
 
-  it('deshabilita botón Generar OT cuando confianza < 0.7', () => {
+  it('deshabilita botón Generar Recomendación cuando confianza < 0.7', () => {
     const diagnosis = makeDiagnosis({ confidence: 0.45 });
     mockUseDiagnoses.mockReturnValue(createMockData({ diagnoses: [diagnosis] }));
     render(<DiagnosisPanel assetId="ASSET-001" />);
 
-    const btn = screen.getByText('Generar OT');
+    const btn = screen.getByText('Generar Recomendación');
     expect(btn.closest('button').disabled).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import {
   Box, AppBar, Toolbar, Typography, Paper, Grid, Snackbar, Alert, Tabs, Tab, Badge,
-  IconButton, Tooltip,
+  IconButton, Tooltip, CircularProgress,
 } from '@mui/material';
 import { Settings } from '@mui/icons-material';
 import AssetTree from './components/AssetTree';
@@ -23,8 +23,13 @@ import DiagnosisPanel from './components/condition/DiagnosisPanel.jsx';
 import RulGauge from './components/condition/RulGauge.jsx';
 import RecommendationCard from './components/condition/RecommendationCard.jsx';
 import PolicyManagementPanel from './components/condition/PolicyManagementPanel.jsx';
+import TemplateManager from './components/pdf/TemplateManager';
+import ScheduleManagementPanel from './components/schedules/ScheduleManagementPanel.jsx';
 import { supabase } from './lib/supabaseClient';
 import './App.css';
+
+// Lazy-loaded: TemplateEditor solo se carga cuando se navega al editor
+const TemplateEditor = lazy(() => import('./components/pdf/TemplateEditor'));
 
 function App() {
   const { loading, syncStatus, error } = useWorkOrders();
@@ -35,13 +40,18 @@ function App() {
   const [conditionSubTab, setConditionSubTab] = useState(0);
   const [showPolicyPanel, setShowPolicyPanel] = useState(false);
 
-  // Índice dinámico del tab "Monitoreo de Condición" (varía según rol)
-  const monitoringTabIndex = (userRole === 'PLANNER' || userRole === 'ADMIN') ? 3 : 2;
-
   // ─── Auth / Rol ─────────────────────────────────────────────────────
   const [userRole, setUserRole] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const { db } = useRxDB();
+
+  // Índice dinámico del tab "Monitoreo de Condición" (varía según rol)
+  // Admin tab agregado en índice 3 para PLANNER/ADMIN → monitoringTabIndex pasa de 3→4
+  const monitoringTabIndex = (userRole === 'PLANNER' || userRole === 'ADMIN') ? 4 : 2;
+
+  // ─── Admin sub-navigation ─────────────────────────────────────
+  const [adminSubTab, setAdminSubTab] = useState('templates'); // 'templates' | 'editor' | 'schedules'
+  const [editingTemplate, setEditingTemplate] = useState(null);
 
   // Obtener rol del usuario desde user_profiles
   useEffect(() => {
@@ -207,6 +217,9 @@ function App() {
               }
             />
           )}
+          {(userRole === 'PLANNER' || userRole === 'ADMIN') && (
+            <Tab label="Admin" />
+          )}
           {(userRole === 'TECHNICIAN' || userRole === 'PLANNER' || userRole === 'ADMIN') && (
             <Tab label="Monitoreo de Condición" />
           )}
@@ -271,6 +284,54 @@ function App() {
               </Paper>
             );
           }
+          // ─── Admin tab (PLANNER/ADMIN only, index 3) ───
+          if (activeTab === 3 && (userRole === 'PLANNER' || userRole === 'ADMIN')) {
+            if (adminSubTab === 'editor' && editingTemplate) {
+              return (
+                <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>}>
+                  <TemplateEditor
+                    template={editingTemplate}
+                    onSaveComplete={() => {
+                      setEditingTemplate(null);
+                      setAdminSubTab('templates');
+                    }}
+                  />
+                </Suspense>
+              );
+            }
+
+            // Admin sub-tabs navigation
+            return (
+              <Box>
+                <Tabs
+                  value={adminSubTab}
+                  onChange={(e, v) => setAdminSubTab(v)}
+                  sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+                >
+                  <Tab label="Templates" value="templates" />
+                  <Tab label="Reportes Programados" value="schedules" />
+                </Tabs>
+
+                {adminSubTab === 'templates' && (
+                  <Paper variant="outlined" sx={{ p: 3 }}>
+                    <TemplateManager
+                      onEdit={(tpl) => {
+                        setEditingTemplate(tpl);
+                        setAdminSubTab('editor');
+                      }}
+                    />
+                  </Paper>
+                )}
+
+                {adminSubTab === 'schedules' && (
+                  <Paper variant="outlined" sx={{ p: 3 }}>
+                    <ScheduleManagementPanel />
+                  </Paper>
+                )}
+              </Box>
+            );
+          }
+
           if (activeTab === monitoringTabIndex) {
             return (
               <Box>

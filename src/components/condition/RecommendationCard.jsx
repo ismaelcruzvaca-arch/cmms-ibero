@@ -1,4 +1,8 @@
 /**
+ * @deprecated SDD 5 — Use RecommendationList component instead.
+ * This component is kept for backward compatibility.
+ * To be removed in SDD 6.
+ *
  * RecommendationCard — Tarjeta de recomendación de mantenimiento
  *
  * Muestra una recomendación activa de mantenimiento con:
