@@ -246,28 +246,24 @@ export default function WorkOrderDrawer({ workOrder, open, onClose, onTransition
           </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {/* Descargar PDF + Imprimir OT — solo visible cuando la OT está completada o cerrada */}
-            {['COMP', 'CLOSED'].includes(workOrder.lifecyclePhase) && (
-              <>
-                <PdfDownloadButton
-                  templateCode="ot-default"
-                  recordId={workOrder.id}
-                  recordType="work_order"
-                  variant="icon"
-                  size="small"
-                />
-                <PdfEmailButton
-                  templateCode="ot-default"
-                  recordId={workOrder.id}
-                  recordType="work_order"
-                />
-                <Tooltip title="Imprimir orden de trabajo">
-                  <IconButton onClick={handlePrintClick} size="small" color="primary">
-                    <PrintIcon />
-                  </IconButton>
-                </Tooltip>
-              </>
-            )}
+            {/* Descargar PDF + Imprimir OT — siempre visible, sin restricción de fase */}
+            <PdfDownloadButton
+              templateCode="ot-default"
+              recordId={workOrder.id}
+              recordType="work_order"
+              variant="icon"
+              size="small"
+            />
+            <PdfEmailButton
+              templateCode="ot-default"
+              recordId={workOrder.id}
+              recordType="work_order"
+            />
+            <Tooltip title="Imprimir orden de trabajo">
+              <IconButton onClick={handlePrintClick} size="small" color="primary">
+                <PrintIcon />
+              </IconButton>
+            </Tooltip>
             <IconButton onClick={onClose} disabled={isSubmitting} size="small">
               <CloseIcon />
             </IconButton>

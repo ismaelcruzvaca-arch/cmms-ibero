@@ -121,8 +121,8 @@ describe('WorkOrderDrawer — PdfEmailButton integration', () => {
     expect(screen.getByTestId('pdf-email-button')).toBeDefined();
   });
 
-  // ───── 3. PdfEmailButton NO renderizado para otras fases ─────
-  it('NO renderiza PdfEmailButton cuando lifecyclePhase no es COMP/CLOSED', () => {
+  // ───── 3. PdfEmailButton visible para TODAS las fases (antes estaba gated por COMP/CLOSED) ─────
+  it('renderiza PdfEmailButton incluso cuando lifecyclePhase es INPRG', () => {
     render(
       <WorkOrderDrawer
         {...defaultProps}
@@ -130,7 +130,7 @@ describe('WorkOrderDrawer — PdfEmailButton integration', () => {
       />,
     );
 
-    expect(screen.queryByTestId('pdf-download-button')).toBeNull();
-    expect(screen.queryByTestId('pdf-email-button')).toBeNull();
+    expect(screen.getByTestId('pdf-download-button')).toBeDefined();
+    expect(screen.getByTestId('pdf-email-button')).toBeDefined();
   });
 });

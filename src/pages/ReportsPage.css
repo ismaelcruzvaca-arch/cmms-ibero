@@ -1,0 +1,39 @@
+/* ReportsPage.css — Print styles and layout */
+
+@media print {
+  /* Hide chrome */
+  .MuiAppBar-root,
+  .MuiTabs-root,
+  nav,
+  button,
+  .MuiToggleButtonGroup-root,
+  .report-filters {
+    display: none !important;
+  }
+
+  /* Report container full width */
+  .report-container {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 10mm !important;
+  }
+
+  /* Single column layout */
+  .report-widget {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-bottom: 8mm;
+  }
+
+  /* Ensure chart colors print */
+  .recharts-surface {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Hide loading spinners and empty states */
+  .MuiCircularProgress-root,
+  .empty-state-icon {
+    display: none !important;
+  }
+}

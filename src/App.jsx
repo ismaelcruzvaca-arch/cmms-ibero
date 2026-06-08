@@ -30,6 +30,7 @@ import './App.css';
 
 // Lazy-loaded: TemplateEditor solo se carga cuando se navega al editor
 const TemplateEditor = lazy(() => import('./components/pdf/TemplateEditor'));
+const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 
 function App() {
   const { loading, syncStatus, error } = useWorkOrders();
@@ -48,6 +49,8 @@ function App() {
   // Índice dinámico del tab "Monitoreo de Condición" (varía según rol)
   // Admin tab agregado en índice 3 para PLANNER/ADMIN → monitoringTabIndex pasa de 3→4
   const monitoringTabIndex = (userRole === 'PLANNER' || userRole === 'ADMIN') ? 4 : 2;
+  // Reports tab siempre va después de Monitoreo de Condición
+  const reportsTabIndex = monitoringTabIndex + 1;
 
   // ─── Admin sub-navigation ─────────────────────────────────────
   const [adminSubTab, setAdminSubTab] = useState('templates'); // 'templates' | 'editor' | 'schedules'
@@ -223,6 +226,8 @@ function App() {
           {(userRole === 'TECHNICIAN' || userRole === 'PLANNER' || userRole === 'ADMIN') && (
             <Tab label="Monitoreo de Condición" />
           )}
+          {/* Reports tab — visible for all roles after Monitoreo */}
+          <Tab label="Reportes" />
         </Tabs>
 
         {(() => {
@@ -329,6 +334,14 @@ function App() {
                   </Paper>
                 )}
               </Box>
+            );
+          }
+
+          if (activeTab === reportsTabIndex) {
+            return (
+              <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>}>
+                <ReportsPage />
+              </Suspense>
             );
           }
 

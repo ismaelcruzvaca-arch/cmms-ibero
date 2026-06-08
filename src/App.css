@@ -9,3 +9,17 @@ body {
   margin: 0;
   padding: 0;
 }
+
+/* Report widget print classes */
+@media print {
+  .report-widget {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-bottom: 8mm;
+  }
+
+  .report-widget .recharts-surface {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}

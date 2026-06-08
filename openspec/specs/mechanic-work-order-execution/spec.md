@@ -18,13 +18,13 @@ A `<WorkOrderDrawer>` MUST open as an overlay (MUI Drawer with dark backdrop) wh
 
 (Previously: R2 listed only Iniciar, Completar, Cerrar buttons.)
 The drawer MUST render action buttons based on `getAllowedTransitions(phase)`:
-- `APPROVED` → **"Iniciar"** button (transitions to INPRG)
-- `INPRG` → **"Iniciar Cierre"** (Begin Close-Out) button that opens FocusModeModal instead of triggering a direct transition, AND a **"Completar"** button that is disabled (with tooltip) while checklist items are pending
-- `COMP` → **"Cerrar"** button (transitions to CLOSED)
+- `APPROVED` → **"Iniciar"** button (transitions to INPRG; auto-creates DIRECT_WORK labor_record with technician_id=auth.uid(), start_time=NOW())
+- `INPRG` → **"Iniciar Cierre"** (Begin Close-Out) button that opens FocusModeModal instead of triggering a direct transition, AND a **"Completar"** button that is disabled (with tooltip) while checklist items are pending. On successful completion, auto-closes the active labor_record (end_time=NOW()).
+- `COMP` → **"Cerrar"** button (transitions to CLOSED; server-side trigger auto-sums labor_records → actual_hours)
 - `CLOSED` → No action buttons (read-only)
 - `WAPPR` → Not shown (filtered by MechanicDashboard)
 
-The "Completar" button SHALL be disabled with tooltip "Completá el checklist de cierre primero" when Block A checklist is incomplete.
+The "Completar" button SHALL be disabled with tooltip "Completá el checklist de cierre primero" when Block A checklist is incomplete, and SHALL be disabled with tooltip "Debés registrar Ingreso antes de Completar" if no active labor session exists.
 
 Each button MUST show a confirmation dialog before executing:
 - "¿Estás seguro de marcar como {Iniciada/Completada/Cerrada} esta orden?"
@@ -55,9 +55,11 @@ If checklist validation fails, the **"Completar"** button MUST be disabled with 
 When the mechanic confirms a transition:
 1. The drawer MUST show a loading state (CircularProgress overlay or disabled form)
 2. The system calls `updateWorkOrder(id, { lifecycle_phase, symptom_note?, cause_note?, action_note? })`
-3. On success: brief success feedback, then close the drawer
-4. On error: show error message, keep drawer open, allow retry
-5. The work order list MUST update reactively via RxDB subscription
+3. For INPRG→COMP: the system MUST also close the active labor_record by setting end_time=NOW()
+4. For APPROVED→INPRG: the system MUST also create an initial labor_record with activity_code='DIRECT_WORK', technician_id=auth.uid(), start_time=NOW()
+5. On success: brief success feedback, then close the drawer
+6. On error: show error message, keep drawer open, allow retry
+7. The work order list MUST update reactively via RxDB subscription
 
 ### R6: Read-Only Detail View
 
@@ -214,6 +216,27 @@ The `work_orders` table MUST add two columns:
 - THEN `is_auditable` SHALL be set to true
 - AND `audit_reason` SHALL contain "Block B checklist required but not completed"
 
+### R13: Clock Widget in Drawer
+
+The Drawer MUST embed the `<ClockWidget>` component between the read-only detail section and the action buttons. The widget MUST receive the current `workOrderId` to scope its labor records.
+
+#### Scenario: Clock widget visible in drawer
+
+- GIVEN the mechanic opens a work order drawer for an INPRG work order
+- WHEN the drawer renders
+- THEN the ClockWidget MUST appear between the detail section and the action buttons
+
+### R14: COMP Validation with Clock State
+
+Before allowing INPRG→COMP, the system MUST validate that an active labor_record exists (end_time IS NULL) for this technician and work order. If no active session exists, the "Completar" button MUST be disabled with tooltip: "Debés registrar Ingreso antes de Completar."
+
+#### Scenario: COMP blocked without clock-in
+
+- GIVEN the work order is in INPRG phase with NO active labor_record
+- WHEN the mechanic views the drawer
+- THEN the "Completar" button MUST be disabled
+- AND the tooltip explains clock-in is required
+
 ## Scenarios
 
 ### Scenario 1: Mechanic opens a work order
@@ -231,9 +254,11 @@ WHEN the mechanic clicks "Iniciar"
 THEN a confirmation dialog appears
 WHEN confirmed
 THEN lifecycle_phase transitions to INPRG
+AND a labor_record is auto-created with activity_code='DIRECT_WORK', technician_id=auth.uid(), start_time=NOW()
 AND the drawer updates reactively
 AND sampling resolution creates checklist_instances for applicable blocks
 AND the notes form now appears
+AND the ClockWidget shows elapsed time
 
 ### Scenario 3: Mechanic completes work with validation
 
@@ -245,6 +270,7 @@ WHEN the mechanic fills both required fields and clicks "Completar"
 THEN the confirmation dialog appears
 WHEN confirmed
 THEN lifecycle_phase transitions to COMP
+AND the active labor_record end_time is set to NOW()
 AND the drawer shows success then closes
 
 ### Scenario 4: Mechanic closes a completed work order
@@ -264,6 +290,14 @@ WHEN updateWorkOrder returns an error
 THEN the drawer shows a clear error message
 AND the mechanic can retry or close
 AND no partial state is left in the UI
+
+### Scenario 5b: Network error during transition with labor record
+
+GIVEN the mechanic confirms APPROVED→INPRG
+WHEN the labor_record insert succeeds but the work_order update fails
+THEN the drawer shows a clear error message
+AND the mechanic can retry
+AND no partial state is left in the UI (orphan labor_record MUST be rolled back)
 
 ### Scenario 6: Sampling resolves with Block A only
 
@@ -357,7 +391,7 @@ AND `audit_reason` SHALL contain "Block B checklist required but not completed"
 GIVEN a work order in INPRG phase
 WHEN the drawer opens
 THEN a "Iniciar Cierre" (Begin Close-Out) button is shown
-AND the "Completar" button is disabled with tooltip "Completá el checklist de cierre primero"
+AND the "Completar" button is disabled with tooltip "Completá el checklist de cierre primero" (or "Debés registrar Ingreso antes de Completar" if no active labor session exists)
 
 ### Scenario 19: Block A validation added to close
 
