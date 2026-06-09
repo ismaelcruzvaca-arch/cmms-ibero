@@ -1433,6 +1433,72 @@ const fmeaAnalysisSchema = {
   required: ['id', 'asset_component_id', 'failure_mode_id']
 };
 
+// ── Condition Monitoring Schemas (SDD 2) ──
+
+const conditionFeatureDefSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    code: { type: 'string', maxLength: 100 },
+    name: { type: 'string' },
+    description: { type: 'string' },
+    data_type: { type: 'string' },
+    unit: { type: 'string' },
+    is_active: { type: 'boolean' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'code', 'name']
+};
+
+const conditionSourcesSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    name: { type: 'string' },
+    source_type: { type: 'string' },
+    config: { type: 'object' },
+    is_active: { type: 'boolean' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'name', 'source_type']
+};
+
+const conditionSourceCapsSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    source_id: { type: 'string', maxLength: 50 },
+    feature_id: { type: 'string', maxLength: 50 },
+    is_capable: { type: 'boolean' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'source_id', 'feature_id']
+};
+
+const captureQueueSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    source_id: { type: 'string', maxLength: 50 },
+    feature_id: { type: 'string', maxLength: 50 },
+    status: { type: 'string' },
+    requested_at: { type: 'string' },
+    captured_at: { type: 'string' },
+    value: { type: 'object' },
+    error: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'source_id', 'feature_id']
+};
+
 // ── PDF Report Engine Schemas ──
 
 const reportTemplateSchema = {
