@@ -1,5 +1,57 @@
 # DEVELOPMENT.md — CMMS Ibero
 
+## Rollback Procedure
+
+### Vercel Rollback
+
+Si un deploy en producción introduce errores:
+
+**Opción A — CLI:**
+```bash
+npx vercel rollback
+```
+Esto revierte al último deploy exitoso.
+
+**Opción B — Dashboard:**
+1. Ir a [Vercel Dashboard](https://vercel.com/) → Proyecto → Deployments
+2. Identificar el último deploy exitoso
+3. Click en "..." → **Promote to Production**
+
+### Supabase Migration Revert
+
+Para revertir una migración de base de datos:
+```sql
+-- Ejecutar en SQL Editor de Supabase Dashboard
+-- Reemplazar <migration_name> con el nombre de la migración a revertir
+DROP TABLE IF EXISTS <tabla_creada>;
+-- O para columnas agregadas:
+ALTER TABLE <tabla> DROP COLUMN IF EXISTS <columna>;
+```
+Siempre mantener un script `down.sql` por cada migración.
+
+### Git Revert
+
+Si el release fue via PR a `main`:
+```bash
+# Encontrar el hash del merge commit
+git log --oneline --merges -1
+
+# Revertir el merge commit
+git revert -m 1 <merge-hash>
+
+# Push del revert
+git push origin main
+```
+
+**Tags:** Si ya se creó un tag para el release:
+```bash
+# Eliminar tag local
+git tag -d v<version>
+
+# Eliminar tag remoto
+git push origin :refs/tags/v<version>
+```
+
 ## Arquitectura Core (2026-05-20)
 
 ### Refactorización ISO 14224 — `work_orders`

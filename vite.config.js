@@ -18,11 +18,22 @@ export default defineConfig({
       'es-toolkit/compat/last',
       'es-toolkit/compat/isPlainObject',
       'es-toolkit/compat/minBy',
+      'es-toolkit/compat/uniqBy',
     ],
   },
   test: {
     exclude: ['tests/**', 'node_modules/**'],
     environment: 'jsdom',
     setupFiles: [],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**'],
+      thresholds: {
+        lines: 40,
+        functions: 30,
+        branches: 35,
+        statements: 40,
+      },
+    },
   },
 })
