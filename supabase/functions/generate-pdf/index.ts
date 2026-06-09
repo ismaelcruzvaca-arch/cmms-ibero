@@ -197,7 +197,7 @@ export async function resolveDataFromDB(
     // Fetch work order with related labor and materials
     const { data: workOrder, error } = await supabase
       .from('work_orders')
-      .select('*, labor:work_order_labor(*), materials:work_order_materials(*)')
+      .select('*, labor:labor_records(*), materials:material_requests(*)')
       .eq('id', recordId)
       .maybeSingle();
 

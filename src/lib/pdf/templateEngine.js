@@ -62,6 +62,7 @@ const VALID_SECTION_TYPES = new Set([
 const VALID_PIPE_NAMES = new Set([
   'uppercase', 'lowercase', 'date', 'truncate', 'round',
   'default', 'notEmpty', 'json', 'number', 'first',
+  'status_label', 'wo_type_label', 'priority_label', 'activity_label', 'datetime',
 ]);
 
 export function validateTemplate(template) {

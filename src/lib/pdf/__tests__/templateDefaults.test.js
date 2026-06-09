@@ -20,9 +20,9 @@ import {
 // ═══════════════════════════════════════════
 
 describe('DEFAULT_PIPES', () => {
-  it('contiene exactamente 10 pipes', () => {
+  it('contiene exactamente 15 pipes', () => {
     const pipeNames = Object.keys(DEFAULT_PIPES);
-    expect(pipeNames).toHaveLength(10);
+    expect(pipeNames).toHaveLength(15);
   });
 
   it('registra uppercase — convierte a mayúsculas', () => {
@@ -40,10 +40,16 @@ describe('DEFAULT_PIPES', () => {
 
   it('registra date — formatea fechas con formato dado', () => {
     const fn = DEFAULT_PIPES.date;
-    const d = new Date(2026, 5, 4, 14, 30, 0); // Jun 4, 2026 14:30
+    const d = new Date(Date.UTC(2026, 5, 4, 14, 30, 0)); // Jun 4, 2026 14:30 UTC
     expect(fn(d, 'DD/MM/YYYY')).toBe('04/06/2026');
     expect(fn(d, 'YYYY-MM-DD')).toBe('2026-06-04');
     expect(fn(d, 'HH:mm')).toBe('14:30');
+  });
+
+  it('date formatea string ISO 8601', () => {
+    const fn = DEFAULT_PIPES.date;
+    expect(fn('2026-06-09T14:30:00Z', 'DD/MM/YYYY')).toBe('09/06/2026');
+    expect(fn('2026-06-09T14:30:00Z', 'HH:mm')).toBe('14:30');
   });
 
   it('date retorna string vacío para valores no-fecha', () => {
@@ -123,6 +129,99 @@ describe('DEFAULT_PIPES', () => {
     expect(fn(['a', 'b', 'c'])).toBe('a');
     expect(fn([])).toBe(undefined);
     expect(fn('no-array')).toBe('no-array');
+  });
+
+  // ──────────────────────────────────────────────
+  // status_label
+  // ──────────────────────────────────────────────
+
+  it('status_label — mapea códigos conocidos a español', () => {
+    const fn = DEFAULT_PIPES.status_label;
+    expect(fn('OPEN')).toBe('Abierta');
+    expect(fn('IN_PROGRESS')).toBe('En Progreso');
+    expect(fn('COMPLETED')).toBe('Completada');
+    expect(fn('CANCELLED')).toBe('Cancelada');
+  });
+
+  it('status_label — código desconocido pasa through', () => {
+    const fn = DEFAULT_PIPES.status_label;
+    expect(fn('UNKNOWN_STATUS')).toBe('UNKNOWN_STATUS');
+    expect(fn('COMP')).toBe('COMP');
+    expect(fn(null)).toBe(null);
+    expect(fn(undefined)).toBe(undefined);
+  });
+
+  // ──────────────────────────────────────────────
+  // wo_type_label
+  // ──────────────────────────────────────────────
+
+  it('wo_type_label — mapea códigos conocidos a español', () => {
+    const fn = DEFAULT_PIPES.wo_type_label;
+    expect(fn('CM')).toBe('Correctivo');
+    expect(fn('PM')).toBe('Preventivo');
+    expect(fn('EM')).toBe('Emergencia');
+    expect(fn('PROJECT')).toBe('Proyecto');
+  });
+
+  it('wo_type_label — código desconocido pasa through', () => {
+    const fn = DEFAULT_PIPES.wo_type_label;
+    expect(fn('UNKNOWN_TYPE')).toBe('UNKNOWN_TYPE');
+    expect(fn(null)).toBe(null);
+    expect(fn(undefined)).toBe(undefined);
+  });
+
+  // ──────────────────────────────────────────────
+  // priority_label
+  // ──────────────────────────────────────────────
+
+  it('priority_label — mapea códigos conocidos a español', () => {
+    const fn = DEFAULT_PIPES.priority_label;
+    expect(fn('HIGH')).toBe('Alta');
+    expect(fn('MEDIUM')).toBe('Media');
+    expect(fn('LOW')).toBe('Baja');
+  });
+
+  it('priority_label — código desconocido pasa through', () => {
+    const fn = DEFAULT_PIPES.priority_label;
+    expect(fn('CRITICAL')).toBe('CRITICAL');
+    expect(fn(null)).toBe(null);
+    expect(fn(undefined)).toBe(undefined);
+  });
+
+  // ──────────────────────────────────────────────
+  // activity_label
+  // ──────────────────────────────────────────────
+
+  it('activity_label — mapea códigos conocidos a español', () => {
+    const fn = DEFAULT_PIPES.activity_label;
+    expect(fn('INSP')).toBe('Inspección');
+    expect(fn('REPAIR')).toBe('Reparación');
+    expect(fn('INSTALL')).toBe('Instalación');
+    expect(fn('REMOVE')).toBe('Retiro');
+  });
+
+  it('activity_label — código desconocido pasa through', () => {
+    const fn = DEFAULT_PIPES.activity_label;
+    expect(fn('CALIBRATE')).toBe('CALIBRATE');
+    expect(fn(null)).toBe(null);
+    expect(fn(undefined)).toBe(undefined);
+  });
+
+  // ──────────────────────────────────────────────
+  // datetime — alias de date con formato fijo
+  // ──────────────────────────────────────────────
+
+  it('datetime — formatea ISO 8601 a DD/MM/YYYY HH:mm', () => {
+    const fn = DEFAULT_PIPES.datetime;
+    expect(fn('2026-06-09T14:30:00Z')).toBe('09/06/2026 14:30');
+    expect(fn('2026-06-04T08:15:00.000Z')).toBe('04/06/2026 08:15');
+  });
+
+  it('datetime — valores no-fecha retornan string vacío', () => {
+    const fn = DEFAULT_PIPES.datetime;
+    expect(fn(null)).toBe('');
+    expect(fn(undefined)).toBe('');
+    expect(fn('invalido')).toBe('');
   });
 });
 

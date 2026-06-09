@@ -1,28 +1,30 @@
 # SDD Configuration — CMMS Ibero
-# Generated: 2026-06-04
+# Generated: 2026-06-09
 # Mode: hybrid (openspec + engram)
 
 context:
-  project: cmms-frontend-react
-  description: "CMMS Ibero — Maintenance management system with offline-first architecture"
+  project: cmms-ibero
+  description: "CMMS Ibero — Maintenance management system with offline-first PWA architecture"
   stack:
     frontend: React 19 + Vite 8 + MUI v9 + Emotion
-    state: RxDB + Dexie (IndexedDB offline-first)
+    state: RxDB v17 + Dexie (IndexedDB offline-first, PWA)
     backend: Supabase (PostgreSQL + Edge Functions / Deno)
-    language: JavaScript/JSX
+    language: JavaScript (JSX for React components)
     monitoring: Sentry
+    bundler: Vite 8
   architecture:
-    - "Offline-first con RxDB/Dexie — los datos se sincronizan con Supabase cuando hay conexión"
-    - "RBAC via user_profiles + RLS policies en PostgreSQL"
+    - "Offline-first con RxDB/Dexie — datos se sincronizan con Supabase via outbox cuando hay conexión"
+    - "RBAC via user_profiles + RLS policies en PostgreSQL (ADMIN, PLANNER, TECHNICIAN, STOREKEEPER)"
     - "ISO 14224 taxonomy para work_orders (failure_class, problem_code, cause_code, remedy_code)"
-    - "FSM lifecycle en work_orders con trigger validate_lifecycle_fsm()"
-    - "Audit trail genérico via audit_trigger_func()"
-    - "Sin Docker disponible — Edge Functions se prueban directo con deno run"
+    - "FSM lifecycle en work_orders con trigger validate_lifecycle_fsm() — solo avance"
+    - "Audit trail genérico via audit_trigger_func() reutilizable para cualquier tabla"
+    - "Sin Docker disponible — Edge Functions se prueban directo con deno run contra cloud"
+    - "Event-driven timestamps en work_orders (8 columnas sin auto-asignación en trigger)"
   conventions:
     commits: Conventional Commits (feat:, fix:, chore:, archive:, refactor:)
     branches: Solo main (monorepo)
     components: Funcionales React + .jsx extensions
-    state: const/let, async/await, arrow functions
+    style: const/let, async/await, arrow functions, no var, no any
 
 strict_tdd: true
 
@@ -33,7 +35,7 @@ testing:
   layers:
     unit:
       available: true
-      tool: Vitest + jsdom + @testing-library/react
+      tool: Vitest v4 + jsdom + @testing-library/react v16
       config: vite.config.js (test: { environment: 'jsdom', exclude: ['tests/**'] })
     integration:
       available: false
@@ -41,7 +43,7 @@ testing:
     e2e:
       available: true
       tool: Playwright v1.59
-      config: playwright.config.js
+      config: playwright.config.js (testDir: './tests', chromium)
       command: npm run test:e2e
   coverage:
     available: false

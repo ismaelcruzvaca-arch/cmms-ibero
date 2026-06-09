@@ -5,7 +5,7 @@
  * JS puro, 0 dependencias externas. Corre idéntico en browser y Deno.
  *
  * Exporta:
- * - DEFAULT_PIPES:          10 pipes para transformar valores
+ * - DEFAULT_PIPES:          15 pipes para transformar valores
  * - SECTION_RENDERERS:      13 renderers por tipo de sección
  * - DEFAULT_CSS:            CSS @media print completo para reportes A4
  * - DEFAULT_TEMPLATE_OT:    Template offline de respaldo (6 secciones)
@@ -20,7 +20,7 @@
  */
 
 // ============================================
-// DEFAULT_PIPES — 10 transformadores
+// DEFAULT_PIPES — 15 transformadores
 // ============================================
 
 /**
@@ -35,12 +35,12 @@ function pipeDate(val, fmt) {
   if (isNaN(d.getTime())) return '';
   const pad = (n) => String(n).padStart(2, '0');
   const map = {
-    YYYY: d.getFullYear(),
-    MM: pad(d.getMonth() + 1),
-    DD: pad(d.getDate()),
-    HH: pad(d.getHours()),
-    mm: pad(d.getMinutes()),
-    ss: pad(d.getSeconds()),
+    YYYY: d.getUTCFullYear(),
+    MM: pad(d.getUTCMonth() + 1),
+    DD: pad(d.getUTCDate()),
+    HH: pad(d.getUTCHours()),
+    mm: pad(d.getUTCMinutes()),
+    ss: pad(d.getUTCSeconds()),
   };
   return fmt.replace(/YYYY|MM|DD|HH|mm|ss/g, (m) => map[m]);
 }
@@ -103,6 +103,27 @@ export const DEFAULT_PIPES = {
   number: pipeNumber,
 
   first: (val) => (Array.isArray(val) ? val[0] : val),
+
+  // ── Lookup pipes (label maps) ──────────────
+
+  /** Mapea lifecycle_phase / status a español */
+  status_label: (val) =>
+    ({ OPEN: 'Abierta', IN_PROGRESS: 'En Progreso', COMPLETED: 'Completada', CANCELLED: 'Cancelada' })[val] ?? val,
+
+  /** Mapea WO type code a español */
+  wo_type_label: (val) =>
+    ({ CM: 'Correctivo', PM: 'Preventivo', EM: 'Emergencia', PROJECT: 'Proyecto' })[val] ?? val,
+
+  /** Mapea priority code a español */
+  priority_label: (val) =>
+    ({ HIGH: 'Alta', MEDIUM: 'Media', LOW: 'Baja' })[val] ?? val,
+
+  /** Mapea activity code a español */
+  activity_label: (val) =>
+    ({ INSP: 'Inspección', REPAIR: 'Reparación', INSTALL: 'Instalación', REMOVE: 'Retiro' })[val] ?? val,
+
+  /** Alias de date() con formato fijo DD/MM/YYYY HH:mm */
+  datetime: (val) => pipeDate(val, 'DD/MM/YYYY HH:mm'),
 };
 
 // ============================================
