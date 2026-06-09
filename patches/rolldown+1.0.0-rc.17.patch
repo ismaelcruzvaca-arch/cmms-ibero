@@ -1,0 +1,13 @@
+diff --git a/node_modules/rolldown/dist/parse-ast-index.mjs b/node_modules/rolldown/dist/parse-ast-index.mjs
+index 8675fa9..2fdd1c4 100644
+--- a/node_modules/rolldown/dist/parse-ast-index.mjs
++++ b/node_modules/rolldown/dist/parse-ast-index.mjs
+@@ -25,7 +25,7 @@ function normalizeParseError(filename, sourceText, errors) {
+ 	return error(log);
+ }
+ const defaultParserOptions = {
+-	lang: "js",
++	lang: "jsx",
+ 	preserveParens: false
+ };
+ /**
