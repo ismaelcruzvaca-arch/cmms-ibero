@@ -1363,6 +1363,76 @@ const checklistSamplingConfigSchema = {
   required: ['id', 'block_type']
 };
 
+// ── FMEA / RCM Schemas ──
+
+const componentTypeSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    name: { type: 'string' },
+    description: { type: 'string' },
+    category: { type: 'string' },
+    default_uom: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'name']
+};
+
+const assetComponentSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    asset_id: { type: 'string', maxLength: 50 },
+    component_type_id: { type: 'string', maxLength: 50 },
+    serial_number: { type: 'string' },
+    position: { type: 'string' },
+    install_date: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'asset_id', 'component_type_id']
+};
+
+const failureModeCatalogSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    code: { type: 'string', maxLength: 50 },
+    name: { type: 'string' },
+    description: { type: 'string' },
+    component_type_id: { type: 'string', maxLength: 50 },
+    severity: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'code', 'name']
+};
+
+const fmeaAnalysisSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 50 },
+    asset_component_id: { type: 'string', maxLength: 50 },
+    failure_mode_id: { type: 'string', maxLength: 50 },
+    cause: { type: 'string' },
+    effect: { type: 'string' },
+    severity: { type: 'number' },
+    occurrence: { type: 'number' },
+    detection: { type: 'number' },
+    rpn: { type: 'number' },
+    recommended_action: { type: 'string' },
+    status: { type: 'string' },
+    _deleted: { type: 'boolean' }
+  },
+  required: ['id', 'asset_component_id', 'failure_mode_id']
+};
+
 // ── PDF Report Engine Schemas ──
 
 const reportTemplateSchema = {
