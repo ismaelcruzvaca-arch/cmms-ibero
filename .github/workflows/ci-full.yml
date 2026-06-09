@@ -1,7 +1,7 @@
 name: CI Full
 
 on:
-  pull_request:
+  push:
     branches: [main]
 
 jobs:
@@ -12,6 +12,8 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
     steps:
       - name: Checkout
@@ -45,3 +47,7 @@ jobs:
           name: coverage-report
           path: coverage/
           retention-days: 7
+
+      - name: Deploy to Vercel
+        if: success()
+        run: npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
