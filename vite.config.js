@@ -10,9 +10,9 @@ export default defineConfig({
   // rxdb excluded from pre-bundling: Rolldown CJS→ESM corrompe
   // argumentos del constructor RxReplicationState (collection: undefined)
   optimizeDeps: {
-    // rxdb excluded: Rolldown CJS→ESM corrompe argumentos del
-    // constructor RxReplicationState (collection: undefined)
-    exclude: ['rxdb'],
+    // rxdb + dexie excluded: Rolldown CJS→ESM corrompe argumentos
+    // del constructor RxReplicationState (collection: undefined)
+    exclude: ['rxdb', 'dexie'],
   },
   test: {
     exclude: ['tests/**', 'node_modules/**'],
