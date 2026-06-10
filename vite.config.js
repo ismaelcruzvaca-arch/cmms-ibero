@@ -5,9 +5,8 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  optimizeDeps: {
-    exclude: ['es-toolkit'],
-  },
+  // es-toolkit compat shims are patched to ESM via patch-package
+  // (see patches/es-toolkit+1.47.0.patch)
   test: {
     exclude: ['tests/**', 'node_modules/**'],
     environment: 'jsdom',

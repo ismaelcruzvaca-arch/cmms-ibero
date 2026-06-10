@@ -1,0 +1,77 @@
+diff --git a/node_modules/es-toolkit/compat/get.js b/node_modules/es-toolkit/compat/get.js
+index 9a7ec7b..cb0bfc4 100644
+--- a/node_modules/es-toolkit/compat/get.js
++++ b/node_modules/es-toolkit/compat/get.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/object/get.js').get;
++export { get as default } from '../dist/compat/object/get.mjs';
+diff --git a/node_modules/es-toolkit/compat/isPlainObject.js b/node_modules/es-toolkit/compat/isPlainObject.js
+index 99e7616..0175003 100644
+--- a/node_modules/es-toolkit/compat/isPlainObject.js
++++ b/node_modules/es-toolkit/compat/isPlainObject.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/predicate/isPlainObject.js').isPlainObject;
++export { isPlainObject as default } from '../dist/compat/predicate/isPlainObject.mjs';
+diff --git a/node_modules/es-toolkit/compat/last.js b/node_modules/es-toolkit/compat/last.js
+index c18269c..9b9d2a5 100644
+--- a/node_modules/es-toolkit/compat/last.js
++++ b/node_modules/es-toolkit/compat/last.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/array/last.js').last;
++export { last as default } from '../dist/compat/array/last.mjs';
+diff --git a/node_modules/es-toolkit/compat/maxBy.js b/node_modules/es-toolkit/compat/maxBy.js
+index 0c4ae4f..c18b48b 100644
+--- a/node_modules/es-toolkit/compat/maxBy.js
++++ b/node_modules/es-toolkit/compat/maxBy.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/math/maxBy.js').maxBy;
++export { maxBy as default } from '../dist/compat/math/maxBy.mjs';
+diff --git a/node_modules/es-toolkit/compat/minBy.js b/node_modules/es-toolkit/compat/minBy.js
+index e10bea2..b3e90fb 100644
+--- a/node_modules/es-toolkit/compat/minBy.js
++++ b/node_modules/es-toolkit/compat/minBy.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/math/minBy.js').minBy;
++export { minBy as default } from '../dist/compat/math/minBy.mjs';
+diff --git a/node_modules/es-toolkit/compat/omit.js b/node_modules/es-toolkit/compat/omit.js
+index 7b1e7c2..2fa5aa7 100644
+--- a/node_modules/es-toolkit/compat/omit.js
++++ b/node_modules/es-toolkit/compat/omit.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/object/omit.js').omit;
++export { omit as default } from '../dist/compat/object/omit.mjs';
+diff --git a/node_modules/es-toolkit/compat/range.js b/node_modules/es-toolkit/compat/range.js
+index c2e8b02..e936ca6 100644
+--- a/node_modules/es-toolkit/compat/range.js
++++ b/node_modules/es-toolkit/compat/range.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/math/range.js').range;
++export { range as default } from '../dist/compat/math/range.mjs';
+diff --git a/node_modules/es-toolkit/compat/sortBy.js b/node_modules/es-toolkit/compat/sortBy.js
+index 65b69a8..1eb0357 100644
+--- a/node_modules/es-toolkit/compat/sortBy.js
++++ b/node_modules/es-toolkit/compat/sortBy.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/array/sortBy.js').sortBy;
++export { sortBy as default } from '../dist/compat/array/sortBy.mjs';
+diff --git a/node_modules/es-toolkit/compat/sumBy.js b/node_modules/es-toolkit/compat/sumBy.js
+index af49922..25fa62c 100644
+--- a/node_modules/es-toolkit/compat/sumBy.js
++++ b/node_modules/es-toolkit/compat/sumBy.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/math/sumBy.js').sumBy;
++export { sumBy as default } from '../dist/compat/math/sumBy.mjs';
+diff --git a/node_modules/es-toolkit/compat/throttle.js b/node_modules/es-toolkit/compat/throttle.js
+index ad24692..027cda6 100644
+--- a/node_modules/es-toolkit/compat/throttle.js
++++ b/node_modules/es-toolkit/compat/throttle.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/function/throttle.js').throttle;
++export { throttle as default } from '../dist/compat/function/throttle.mjs';
+diff --git a/node_modules/es-toolkit/compat/uniqBy.js b/node_modules/es-toolkit/compat/uniqBy.js
+index f14c0f7..03fcf3b 100644
+--- a/node_modules/es-toolkit/compat/uniqBy.js
++++ b/node_modules/es-toolkit/compat/uniqBy.js
+@@ -1 +1 @@
+-module.exports = require('../dist/compat/array/uniqBy.js').uniqBy;
++export { uniqBy as default } from '../dist/compat/array/uniqBy.mjs';
