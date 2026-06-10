@@ -313,11 +313,37 @@ let initPromise = null;
 let replicationStates = {};
 
 async function _createDatabase() {
-  const db = await createRxDatabase({
-    name: DB_NAME,
-    storage: getRxStorageDexie(),
-    multiInstance: false
-  });
+  let db;
+  try {
+    db = await createRxDatabase({
+      name: DB_NAME,
+      storage: getRxStorageDexie(),
+      multiInstance: false
+    });
+  } catch (err) {
+    // RxError DB8: database already exists (IndexedDB persistio de sesion anterior)
+    if (err && err.code === 'DB8') {
+      console.warn('[RxDB] DB8 detectado, forzando recreacion de la base de datos...');
+      // Forzar cierre de la DB existente y crear nueva
+      await db?.close?.();
+      await new Promise((resolve, reject) => {
+        const req = indexedDB.deleteDatabase(DB_NAME);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+        req.onblocked = () => {
+          console.warn('[RxDB] deleteDatabase bloqueado, continuando de todas formas');
+          resolve();
+        };
+      });
+      db = await createRxDatabase({
+        name: DB_NAME,
+        storage: getRxStorageDexie(),
+        multiInstance: false
+      });
+    } else {
+      throw err;
+    }
+  }
 
   try {
     await db.addCollections({
