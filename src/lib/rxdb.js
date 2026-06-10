@@ -450,11 +450,15 @@ export async function initRxDB() {
 
   console.log('[RxDB] Inicializando base de datos...');
 
+  // Setear initPromise ANTES del await para prevenir race condition:
+  // React Strict Mode monta dos veces sincronicamente, y createRxDatabase
+  // agrega a USED_DATABASE_NAMES antes de completar. Si la segunda llamada
+  // llega antes de que la primera termine, encuentra el nombre ocupado y
+  // lanza RxError DB8.
+  initPromise = _createDatabase();
   try {
-    const db = await _createDatabase();
-    dbInstance = db;
+    dbInstance = await initPromise;
     console.log('[RxDB] Instancia creada exitosamente');
-    initPromise = db;
   } catch (err) {
     console.error('[RxDB] Error en inicialización:', err);
     initPromise = null;
