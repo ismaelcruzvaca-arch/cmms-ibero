@@ -1128,6 +1128,7 @@ export async function startAllReplications(db) {
 
   // Suscripciones a estados
   Object.entries(replicationStates).forEach(([key, state]) => {
+    if (!state) return;
     state.active$.subscribe(isActive => {
       console.log(`[RxDB] ${key} activa:`, isActive);
     });
