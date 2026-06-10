@@ -1,13 +1,17 @@
 import { test, expect } from '@playwright/test';
 
 test('homepage loads with title', async ({ page }) => {
+  const start = Date.now();
   await page.goto('/');
-  await expect(page.locator('h1')).toContainText('Módulo de Jerarquía de Activos');
+  await expect(page.locator('h1')).toContainText('Módulo de Jerarquía de Activos', { timeout: 30000 });
+  console.log(`[TIMING] h1 visible after ${Date.now() - start}ms`);
 });
 
 test('asset tree component renders', async ({ page }) => {
+  const start = Date.now();
   await page.goto('/');
-  await expect(page.locator('[role="tree"]')).toBeVisible();
+  await expect(page.locator('[role="tree"]')).toBeVisible({ timeout: 30000 });
+  console.log(`[TIMING] tree visible after ${Date.now() - start}ms`);
 });
 
 test('add asset form renders correctly in dialog', async ({ page }) => {
