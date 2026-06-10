@@ -985,7 +985,54 @@ export async function startAllReplications(db) {
   });
 
   // ── Condition Monitoring Replications (SDD 2) ──
-  startConditionReplications(db);
+  // condition_feature_definitions (pull + push — catálogo de features)
+  replicationStates.condition_feature_definitions = replicateRxCollection({
+    collection: db.condition_feature_definitions,
+    replicationIdentifier: 'cmms-cfd-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('condition_feature_definitions', 'id') },
+    push: { handler: createPushHandler('condition_feature_definitions', [
+      'id', 'code', 'name', 'description', 'data_type', 'unit', 'is_active'
+    ]) }
+  });
+
+  // condition_sources (pull + push — fuentes de datos)
+  replicationStates.condition_sources = replicateRxCollection({
+    collection: db.condition_sources,
+    replicationIdentifier: 'cmms-cs-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('condition_sources', 'id') },
+    push: { handler: createPushHandler('condition_sources', [
+      'id', 'name', 'source_type', 'config', 'is_active'
+    ]) }
+  });
+
+  // condition_source_capabilities (pull + push — capacidades declaradas)
+  replicationStates.condition_source_capabilities = replicateRxCollection({
+    collection: db.condition_source_capabilities,
+    replicationIdentifier: 'cmms-cscap-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('condition_source_capabilities', 'id') },
+    push: { handler: createPushHandler('condition_source_capabilities', [
+      'id', 'source_id', 'feature_id', 'is_capable'
+    ]) }
+  });
+
+  // condition_capture_queue (push-only — cola de captura local)
+  replicationStates.condition_capture_queue = replicateRxCollection({
+    collection: db.condition_capture_queue,
+    replicationIdentifier: 'cmms-ccq-sync',
+    live: true,
+    retryTime: 5000,
+    pull: { handler: createPullHandler('condition_capture_queue', 'requested_at') },
+    push: { handler: createPushHandler('condition_capture_queue', [
+      'id', 'source_id', 'feature_id', 'status',
+      'requested_at', 'captured_at', 'value', 'error'
+    ]) }
+  });
 
     // ── PDF Report Engine Replications ──
   // report_templates (push no-op — writes bypass RxDB vía useTemplates hook)
