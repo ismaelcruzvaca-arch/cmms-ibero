@@ -316,7 +316,8 @@ async function _createDatabase() {
   const db = await createRxDatabase({
     name: DB_NAME,
     storage: getRxStorageDexie(),
-    multiInstance: false
+    multiInstance: false,
+    ignoreDuplicate: true
   });
 
   try {
@@ -357,7 +358,8 @@ async function _createDatabase() {
       const newDb = await createRxDatabase({
         name: DB_NAME,
         storage: getRxStorageDexie(),
-        multiInstance: false
+        multiInstance: false,
+        ignoreDuplicate: true
       });
       await newDb.addCollections({
         work_orders: {
