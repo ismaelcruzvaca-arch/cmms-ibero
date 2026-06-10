@@ -797,12 +797,27 @@ function createLaborPushHandler(tableName) {
 // ============================================
 // REPLICACIONES
 // ============================================
+
+/**
+ * Wrapper seguro para replicateRxCollection que captura errores
+ * sincrónicos (tablas faltantes, schemas desincronizados) y los
+ * loggea sin romper la app. Retorna null si falla.
+ */
+function safeReplicate(options) {
+  try {
+    return replicateRxCollection(options);
+  } catch (err) {
+    console.warn(`[RxDB Sync] ⚠ Replication SKIPPED for ${options.replicationIdentifier}: ${err.message}`);
+    return null;
+  }
+}
+
 export async function startAllReplications(db) {
   // Work Orders
   const woPull = createPullHandler('work_orders', 'updated_at');
   const woPush = createWorkOrderPushHandler('work_orders');
 
-  replicationStates.work_orders = replicateRxCollection({
+  replicationStates.work_orders = safeReplicate({
     collection: db.work_orders,
     replicationIdentifier: 'cmms-wo-sync',
     live: true,
@@ -820,7 +835,7 @@ export async function startAllReplications(db) {
     'technical_specs', 'created_at'
   ]);
 
-  replicationStates.assets = replicateRxCollection({
+  replicationStates.assets = safeReplicate({
     collection: db.assets,
     replicationIdentifier: 'cmms-assets-sync',
     live: true,
@@ -835,7 +850,7 @@ export async function startAllReplications(db) {
     'id', 'parent_id', 'child_id', 'hierarchy_level', 'created_at'
   ]);
 
-  replicationStates.asset_hierarchy = replicateRxCollection({
+  replicationStates.asset_hierarchy = safeReplicate({
     collection: db.asset_hierarchy,
     replicationIdentifier: 'cmms-hierarchy-sync',
     live: true,
@@ -851,7 +866,7 @@ export async function startAllReplications(db) {
     'requested_qty', 'created_at'
   ]);
 
-  replicationStates.material_requests = replicateRxCollection({
+  replicationStates.material_requests = safeReplicate({
     collection: db.material_requests,
     replicationIdentifier: 'cmms-mr-sync',
     live: true,
@@ -864,7 +879,7 @@ export async function startAllReplications(db) {
   const laborPull = createLaborPullHandler('labor_records', 'updated_at');
   const laborPush = createLaborPushHandler('labor_records');
 
-  replicationStates.labor_records = replicateRxCollection({
+  replicationStates.labor_records = safeReplicate({
     collection: db.labor_records,
     replicationIdentifier: 'cmms-lr-sync',
     live: true,
@@ -875,7 +890,7 @@ export async function startAllReplications(db) {
 
   // ── Checklist Replications ──
   // causa_falla_catalog (pull-only — catálogo fijo)
-  replicationStates.causa_falla_catalog = replicateRxCollection({
+  replicationStates.causa_falla_catalog = safeReplicate({
     collection: db.causa_falla_catalog,
     replicationIdentifier: 'cmms-cfc-sync',
     live: true,
@@ -885,7 +900,7 @@ export async function startAllReplications(db) {
   });
 
   // checklist_templates (pull-only — leídos del servidor)
-  replicationStates.checklist_templates = replicateRxCollection({
+  replicationStates.checklist_templates = safeReplicate({
     collection: db.checklist_templates,
     replicationIdentifier: 'cmms-ct-sync',
     live: true,
@@ -898,7 +913,7 @@ export async function startAllReplications(db) {
   });
 
   // checklist_instances (pull + push — creadas localmente, sincronizadas)
-  replicationStates.checklist_instances = replicateRxCollection({
+  replicationStates.checklist_instances = safeReplicate({
     collection: db.checklist_instances,
     replicationIdentifier: 'cmms-ci-sync',
     live: true,
@@ -912,7 +927,7 @@ export async function startAllReplications(db) {
   });
 
   // checklist_item_responses (pull + push)
-  replicationStates.checklist_item_responses = replicateRxCollection({
+  replicationStates.checklist_item_responses = safeReplicate({
     collection: db.checklist_item_responses,
     replicationIdentifier: 'cmms-cir-sync',
     live: true,
@@ -925,7 +940,7 @@ export async function startAllReplications(db) {
   });
 
   // checklist_sampling_config (pull-only — leídos del servidor)
-  replicationStates.checklist_sampling_config = replicateRxCollection({
+  replicationStates.checklist_sampling_config = safeReplicate({
     collection: db.checklist_sampling_config,
     replicationIdentifier: 'cmms-csc-sync',
     live: true,
@@ -939,7 +954,7 @@ export async function startAllReplications(db) {
 
   // ── FMEA / RCM Replications ──
   // component_types (pull-only — catálogo fijo)
-  replicationStates.component_types = replicateRxCollection({
+  replicationStates.component_types = safeReplicate({
     collection: db.component_types,
     replicationIdentifier: 'cmms-ctypes-sync',
     live: true,
@@ -948,7 +963,7 @@ export async function startAllReplications(db) {
   });
 
   // asset_components (pull-only — catálogo filtrado por asset_id)
-  replicationStates.asset_components = replicateRxCollection({
+  replicationStates.asset_components = safeReplicate({
     collection: db.asset_components,
     replicationIdentifier: 'cmms-acomp-sync',
     live: true,
@@ -957,7 +972,7 @@ export async function startAllReplications(db) {
   });
 
   // failure_mode_catalog (pull-only — catálogo filtrado por component_type_id)
-  replicationStates.failure_mode_catalog = replicateRxCollection({
+  replicationStates.failure_mode_catalog = safeReplicate({
     collection: db.failure_mode_catalog,
     replicationIdentifier: 'cmms-fmc-sync',
     live: true,
@@ -975,7 +990,7 @@ export async function startAllReplications(db) {
     'analyzed_by', 'notes', 'created_at', 'updated_at'
   ]);
 
-  replicationStates.fmea_rcm_analysis = replicateRxCollection({
+  replicationStates.fmea_rcm_analysis = safeReplicate({
     collection: db.fmea_rcm_analysis,
     replicationIdentifier: 'cmms-fmea-sync',
     live: true,
@@ -986,7 +1001,7 @@ export async function startAllReplications(db) {
 
   // ── Condition Monitoring Replications (SDD 2) ──
   // condition_feature_definitions (pull + push — catálogo de features)
-  replicationStates.condition_feature_definitions = replicateRxCollection({
+  replicationStates.condition_feature_definitions = safeReplicate({
     collection: db.condition_feature_definitions,
     replicationIdentifier: 'cmms-cfd-sync',
     live: true,
@@ -998,7 +1013,7 @@ export async function startAllReplications(db) {
   });
 
   // condition_sources (pull + push — fuentes de datos)
-  replicationStates.condition_sources = replicateRxCollection({
+  replicationStates.condition_sources = safeReplicate({
     collection: db.condition_sources,
     replicationIdentifier: 'cmms-cs-sync',
     live: true,
@@ -1010,7 +1025,7 @@ export async function startAllReplications(db) {
   });
 
   // condition_source_capabilities (pull + push — capacidades declaradas)
-  replicationStates.condition_source_capabilities = replicateRxCollection({
+  replicationStates.condition_source_capabilities = safeReplicate({
     collection: db.condition_source_capabilities,
     replicationIdentifier: 'cmms-cscap-sync',
     live: true,
@@ -1022,7 +1037,7 @@ export async function startAllReplications(db) {
   });
 
   // condition_capture_queue (push-only — cola de captura local)
-  replicationStates.condition_capture_queue = replicateRxCollection({
+  replicationStates.condition_capture_queue = safeReplicate({
     collection: db.condition_capture_queue,
     replicationIdentifier: 'cmms-ccq-sync',
     live: true,
@@ -1036,7 +1051,7 @@ export async function startAllReplications(db) {
 
     // ── PDF Report Engine Replications ──
   // report_templates (push no-op — writes bypass RxDB vía useTemplates hook)
-  replicationStates.report_templates = replicateRxCollection({
+  replicationStates.report_templates = safeReplicate({
     collection: db.report_templates,
     replicationIdentifier: 'cmms-rt-sync',
     live: true,
@@ -1051,7 +1066,7 @@ export async function startAllReplications(db) {
     'report_data', 'generated_by', 'generated_at'
   ];
 
-  replicationStates.report_history = replicateRxCollection({
+  replicationStates.report_history = safeReplicate({
     collection: db.report_history,
     replicationIdentifier: 'cmms-rh-sync',
     live: true,
@@ -1137,7 +1152,7 @@ export async function forceResync(collectionName) {
     state.cancel();
     const db = dbInstance;
     if (db && db[collectionName]) {
-      replicationStates[collectionName] = replicateRxCollection({
+      replicationStates[collectionName] = safeReplicate({
         collection: db[collectionName],
         replicationIdentifier: `cmms-${collectionName}-resync-${Date.now()}`,
         live: true,
