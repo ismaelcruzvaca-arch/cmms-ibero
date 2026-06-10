@@ -821,6 +821,11 @@ function createLaborPushHandler(tableName) {
  */
 function safeReplicate(options) {
   try {
+    // Validar que la colección exista en RxDB antes de replicar
+    if (!options.collection) {
+      console.warn(`[RxDB Sync] ⚠ Replication SKIPPED for ${options.replicationIdentifier}: collection is undefined`);
+      return null;
+    }
     const state = replicateRxCollection({
       ...options,
       autoStart: false
