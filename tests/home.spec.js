@@ -1,5 +1,16 @@
 import { test, expect } from '@playwright/test';
 
+// Limpiar IndexedDB antes de cada test para evitar RxError DB8
+test.beforeEach(async ({ page }) => {
+  await page.goto('about:blank');
+  await page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase('cmms-db');
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => resolve();
+  }));
+});
+
 test('homepage loads with title', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('h1')).toContainText('Módulo de Jerarquía de Activos');
