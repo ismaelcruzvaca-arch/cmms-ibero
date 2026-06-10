@@ -7,11 +7,15 @@ export default defineConfig({
   plugins: [react()],
   // es-toolkit compat shims are patched to ESM via patch-package
   // (see patches/es-toolkit+1.47.0.patch)
-  // rxdb + dexie excluded: Rolldown CJS→ESM corrompe argumentos de
-  // RxReplicationState (collection: undefined). dexie tienen version
-  // distinta dentro de rxdb/node_modules/ (4.0.10 vs 4.4.2 global).
+  // rxdb excluded: Rolldown CJS→ESM corrompe argumentos de
+  // RxReplicationState (collection: undefined).
+  // dexie dedupe: rxdb tiene dexie 4.0.10 anidado, el global es 4.4.2.
+  // Al deduplicar, rxdb usa el dexie global que se pre-bundlea bien.
   optimizeDeps: {
-    exclude: ['rxdb', 'dexie'],
+    exclude: ['rxdb'],
+  },
+  resolve: {
+    dedupe: ['dexie'],
   },
   test: {
     exclude: ['tests/**', 'node_modules/**'],
