@@ -10,15 +10,9 @@ export default defineConfig({
   // rxdb excluded from pre-bundling: Rolldown CJS→ESM corrompe
   // argumentos del constructor RxReplicationState (collection: undefined)
   optimizeDeps: {
+    // rxdb excluded: Rolldown CJS→ESM corrompe argumentos del
+    // constructor RxReplicationState (collection: undefined)
     exclude: ['rxdb'],
-  },
-  resolve: {
-    // Forzar ESM para rxdb plugins (el CJS shim causa errores con esbuild)
-    alias: {
-      'rxdb/plugins/replication': 'rxdb/plugins/replication/index.mjs',
-      'rxdb/plugins/storage-dexie': 'rxdb/plugins/storage-dexie/index.mjs',
-      'rxdb/plugins/migration-schema': 'rxdb/plugins/migration-schema/index.mjs',
-    },
   },
   test: {
     exclude: ['tests/**', 'node_modules/**'],
