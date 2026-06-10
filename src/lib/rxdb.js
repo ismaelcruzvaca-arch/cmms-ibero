@@ -460,6 +460,11 @@ function createPullHandler(tableName, orderField = 'updated_at') {
     try {
       const { data, error } = await query;
       if (error) {
+        // Si la tabla no existe en Supabase, retornar vacío en lugar de fallar
+        if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
+          console.warn(`[RxDB Sync] ⚠ Tabla ${tableName} no existe en Supabase. Pull desactivado.`);
+          return { documents: [], checkpoint: null };
+        }
         console.error(`[RxDB Sync] Error en consulta pull de ${tableName}:`, error);
         throw error;
       }
@@ -689,6 +694,11 @@ function createLaborPullHandler(tableName, orderField = 'updated_at') {
     try {
       const { data, error } = await query;
       if (error) {
+        // Si la tabla no existe en Supabase, retornar vacío en lugar de fallar
+        if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
+          console.warn(`[RxDB Sync] ⚠ Tabla ${tableName} no existe en Supabase. Pull desactivado.`);
+          return { documents: [], checkpoint: null };
+        }
         console.error(`[RxDB Sync] Error en consulta pull de ${tableName}:`, error);
         throw error;
       }
@@ -800,16 +810,50 @@ function createLaborPushHandler(tableName) {
 
 /**
  * Wrapper seguro para replicateRxCollection que captura errores
- * sincrónicos (tablas faltantes, schemas desincronizados) y los
- * loggea sin romper la app. Retorna null si falla.
+ * sincrónicos y asíncronos (tablas faltantes, schemas desincronizados)
+ * y los loggea sin romper la app. Retorna null si falla.
  */
 function safeReplicate(options) {
   try {
-    return replicateRxCollection(options);
+    const state = replicateRxCollection(options);
+    // Suscribirse al error$ para evitar unhandled rejections
+    if (state && state.error$) {
+      state.error$.subscribe(err => {
+        console.warn(`[RxDB Sync] ⚠ Replication error for ${options.replicationIdentifier}:`, err?.message || err);
+      });
+    }
+    // También suscribirse al $ (active state) para capturar errores tempranos
+    if (state && state.$) {
+      state.$.subscribe({
+        error: (err) => {
+          console.warn(`[RxDB Sync] ⚠ Replication state error for ${options.replicationIdentifier}:`, err?.message || err);
+        }
+      });
+    }
+    return state;
   } catch (err) {
     console.warn(`[RxDB Sync] ⚠ Replication SKIPPED for ${options.replicationIdentifier}: ${err.message}`);
     return null;
   }
+}
+
+/**
+ * Versión segura de createPullHandler que retorna vacío en lugar de
+ * lanzar error cuando la tabla no existe en Supabase.
+ */
+function safePullHandler(tableName, orderField = 'updated_at') {
+  return async (checkpoint, batchSize = BATCH_SIZE) => {
+    try {
+      const handler = createPullHandler(tableName, orderField);
+      return await handler(checkpoint, batchSize);
+    } catch (err) {
+      if (err?.code === 'PGRST205' || err?.message?.includes('Could not find the table')) {
+        console.warn(`[RxDB Sync] ⚠ Tabla ${tableName} no existe en Supabase. Replicación desactivada.`);
+        return { documents: [], checkpoint: null };
+      }
+      throw err;
+    }
+  };
 }
 
 export async function startAllReplications(db) {
