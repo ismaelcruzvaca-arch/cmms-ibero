@@ -12,6 +12,14 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['rxdb'],
   },
+  resolve: {
+    // Forzar ESM para rxdb plugins (el CJS shim causa errores con esbuild)
+    alias: {
+      'rxdb/plugins/replication': 'rxdb/plugins/replication/index.mjs',
+      'rxdb/plugins/storage-dexie': 'rxdb/plugins/storage-dexie/index.mjs',
+      'rxdb/plugins/migration-schema': 'rxdb/plugins/migration-schema/index.mjs',
+    },
+  },
   test: {
     exclude: ['tests/**', 'node_modules/**'],
     environment: 'jsdom',
