@@ -9,13 +9,11 @@ export default defineConfig({
   // (see patches/es-toolkit+1.47.0.patch)
   // rxdb excluded: Rolldown CJS→ESM corrompe argumentos de
   // RxReplicationState (collection: undefined).
-  // dexie dedupe: rxdb tiene dexie 4.0.10 anidado, el global es 4.4.2.
-  // Al deduplicar, rxdb usa el dexie global que se pre-bundlea bien.
+  // dexie included: fuerza pre-bundling correcto (Rolldown) en vez
+  // de la conversion on-the-fly de esbuild que no genera default export.
   optimizeDeps: {
     exclude: ['rxdb'],
-  },
-  resolve: {
-    dedupe: ['dexie'],
+    include: ['dexie'],
   },
   test: {
     exclude: ['tests/**', 'node_modules/**'],
