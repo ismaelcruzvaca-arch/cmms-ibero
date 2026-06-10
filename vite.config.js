@@ -10,6 +10,12 @@ export default defineConfig({
   // dexie import-wrapper.mjs patched to use dist/dexie.mjs (ESM nativo)
   // en vez de dist/dexie.js (CJS/UMD que Rolldown no convierte bien).
   // (see patches/dexie+4.4.2.patch)
+  // rxdb excluded: Rolldown CJS→ESM corrompe argumentos del constructor
+  // RxReplicationState (collection: undefined). Los index.cjs de los
+  // plugins ya fueron parcheados a ESM via patch-package previo.
+  optimizeDeps: {
+    exclude: ['rxdb'],
+  },
   test: {
     exclude: ['tests/**', 'node_modules/**'],
     environment: 'jsdom',
