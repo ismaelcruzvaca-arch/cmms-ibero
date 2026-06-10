@@ -1,0 +1,20 @@
+diff --git a/node_modules/dexie/import-wrapper.mjs b/node_modules/dexie/import-wrapper.mjs
+index 4d9bbba..2aa4ced 100644
+--- a/node_modules/dexie/import-wrapper.mjs
++++ b/node_modules/dexie/import-wrapper.mjs
+@@ -1,4 +1,4 @@
+ // Making the module version consumable via require - to prohibit
+ // multiple occurrancies of the same module in the same app
+ // (dual package hazard, https://nodejs.org/api/packages.html#dual-package-hazard)
+-import _Dexie from "./dist/dexie.js";
++import _Dexie from "./dist/dexie.mjs";
+diff --git a/node_modules/rxdb/node_modules/dexie/import-wrapper.mjs b/node_modules/rxdb/node_modules/dexie/import-wrapper.mjs
+index 6276a41..a3ae77d 100644
+--- a/node_modules/rxdb/node_modules/dexie/import-wrapper.mjs
++++ b/node_modules/rxdb/node_modules/dexie/import-wrapper.mjs
+@@ -1,4 +1,4 @@
+ // Making the module version consumable via require - to prohibit
+ // multiple occurrancies of the same module in the same app
+ // (dual package hazard, https://nodejs.org/api/packages.html#dual-package-hazard)
+-import _Dexie from "./dist/dexie.js";
++import _Dexie from "./dist/dexie.mjs";

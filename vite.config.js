@@ -7,14 +7,9 @@ export default defineConfig({
   plugins: [react()],
   // es-toolkit compat shims are patched to ESM via patch-package
   // (see patches/es-toolkit+1.47.0.patch)
-  // rxdb excluded: Rolldown CJS→ESM corrompe argumentos de
-  // RxReplicationState (collection: undefined).
-  // dexie included: fuerza pre-bundling correcto (Rolldown) en vez
-  // de la conversion on-the-fly de esbuild que no genera default export.
-  optimizeDeps: {
-    exclude: ['rxdb'],
-    include: ['dexie'],
-  },
+  // dexie import-wrapper.mjs patched to use dist/dexie.mjs (ESM nativo)
+  // en vez de dist/dexie.js (CJS/UMD que Rolldown no convierte bien).
+  // (see patches/dexie+4.4.2.patch)
   test: {
     exclude: ['tests/**', 'node_modules/**'],
     environment: 'jsdom',
