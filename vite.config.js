@@ -7,13 +7,6 @@ export default defineConfig({
   plugins: [react()],
   // es-toolkit compat shims are patched to ESM via patch-package
   // (see patches/es-toolkit+1.47.0.patch)
-  // rxdb excluded from pre-bundling: Rolldown CJS→ESM corrompe
-  // argumentos del constructor RxReplicationState (collection: undefined)
-  optimizeDeps: {
-    // rxdb + dexie excluded: Rolldown CJS→ESM corrompe argumentos
-    // del constructor RxReplicationState (collection: undefined)
-    exclude: ['rxdb', 'dexie'],
-  },
   test: {
     exclude: ['tests/**', 'node_modules/**'],
     environment: 'jsdom',
