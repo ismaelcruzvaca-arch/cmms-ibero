@@ -812,23 +812,30 @@ function createLaborPushHandler(tableName) {
  * Wrapper seguro para replicateRxCollection que captura errores
  * sincrónicos y asíncronos (tablas faltantes, schemas desincronizados)
  * y los loggea sin romper la app. Retorna null si falla.
+ *
+ * RxDB v17 llama internamente a replicationState.start() sin .catch(),
+ * por lo que un error en el pull handler (tabla no existe) genera un
+ * unhandled promise rejection que rompe la app. Este wrapper:
+ * 1. Desactiva autoStart para que replicateRxCollection no llame a start()
+ * 2. Llama a start() manualmente con .catch() para manejar el error
  */
 function safeReplicate(options) {
   try {
-    const state = replicateRxCollection(options);
-    // Suscribirse al error$ para evitar unhandled rejections
-    if (state && state.error$) {
-      state.error$.subscribe(err => {
-        console.warn(`[RxDB Sync] ⚠ Replication error for ${options.replicationIdentifier}:`, err?.message || err);
+    const state = replicateRxCollection({
+      ...options,
+      autoStart: false
+    });
+    if (state) {
+      // Iniciar replicación manualmente con manejo de errores
+      state.start().catch(err => {
+        console.warn(`[RxDB Sync] ⚠ Replication start error for ${options.replicationIdentifier}:`, err?.message || err);
       });
-    }
-    // También suscribirse al $ (active state) para capturar errores tempranos
-    if (state && state.$) {
-      state.$.subscribe({
-        error: (err) => {
-          console.warn(`[RxDB Sync] ⚠ Replication state error for ${options.replicationIdentifier}:`, err?.message || err);
-        }
-      });
+      // Suscribirse al error$ para errores posteriores
+      if (state.error$) {
+        state.error$.subscribe(err => {
+          console.warn(`[RxDB Sync] ⚠ Replication runtime error for ${options.replicationIdentifier}:`, err?.message || err);
+        });
+      }
     }
     return state;
   } catch (err) {
