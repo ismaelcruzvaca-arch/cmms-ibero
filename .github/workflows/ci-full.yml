@@ -32,8 +32,6 @@ jobs:
         run: |
           echo "VITE_SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
           echo "VITE_SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
-          echo "VITE_TEST_EMAIL=${{ secrets.VITE_TEST_EMAIL }}" >> .env
-          echo "VITE_TEST_PASSWORD=${{ secrets.VITE_TEST_PASSWORD }}" >> .env
 
       - name: Tests
         run: npm test

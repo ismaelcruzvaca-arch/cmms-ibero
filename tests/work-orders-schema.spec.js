@@ -26,7 +26,7 @@ const anonSupabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_
 
 test.beforeAll(async () => {
   const { error } = await supabase.auth.signInWithPassword({
-    email: env.VITE_TEST_EMAIL || 'test-sdd@example.com',
+    email: env.VITE_TEST_EMAIL || 'e2e-test@testuser.com',
     password: env.VITE_TEST_PASSWORD || 'TestPass123!'
   });
   expect(error).toBeNull();
