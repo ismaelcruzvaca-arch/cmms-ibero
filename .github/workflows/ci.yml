@@ -1,8 +1,11 @@
 name: CI
 
+# ⚠️ TEMPORARILY DISABLED while CircleCI is configured
+# Re-enable when ready: uncomment push below and remove workflow_dispatch
 on:
-  push:
-    branches-ignore: [main]
+  workflow_dispatch:
+  # push:
+  #   branches-ignore: [main]
 
 jobs:
   ci:

@@ -29,7 +29,7 @@ jobs:
   test:
     docker:
       - image: cimg/node:22.22
-    resource_class: small
+    resource_class: medium
     steps:
       - checkout
       - install-deps
