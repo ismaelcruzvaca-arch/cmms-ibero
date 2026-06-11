@@ -30,6 +30,13 @@ test.beforeAll(async () => {
     password: env.VITE_TEST_PASSWORD || 'TestPass123!'
   });
   expect(error).toBeNull();
+
+  // Clean up leftover test data from previous runs
+  const { error: cleanupErr } = await supabase
+    .from('work_orders')
+    .delete()
+    .ilike('id', 'TEST-WO-%');
+  if (cleanupErr) console.warn('[cleanup] work_orders:', cleanupErr.message);
 });
 
 test.afterAll(async () => {
