@@ -1,0 +1,138 @@
+version: 2.1
+
+orbs:
+  node: circleci/node@7.1.0
+
+commands:
+  install-deps:
+    steps:
+      - node/install:
+          node-version: '22.0.0'
+      - node/install-packages:
+          pkg-manager: npm
+          override-ci-command: npm ci --legacy-peer-deps
+          cache-version: v1
+
+  setup-env:
+    steps:
+      - run:
+          name: Create .env for E2E
+          command: |
+            echo "VITE_SUPABASE_URL=$SUPABASE_URL" >> .env
+            echo "VITE_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> .env
+            echo "VITE_TEST_EMAIL=$VITE_TEST_EMAIL" >> .env
+            echo "VITE_TEST_PASSWORD=$VITE_TEST_PASSWORD" >> .env
+
+jobs:
+  test:
+    docker:
+      - image: cimg/node:22.0.0
+    resource_class: small
+    steps:
+      - checkout
+      - install-deps
+      - run:
+          name: Unit tests
+          command: npm test
+      - run:
+          name: Coverage
+          command: npm run test:coverage
+      - store_artifacts:
+          path: coverage
+
+  lint:
+    docker:
+      - image: cimg/node:22.0.0
+    resource_class: small
+    steps:
+      - checkout
+      - install-deps
+      - run:
+          name: Lint
+          command: npm run lint
+          when: always
+
+  build:
+    docker:
+      - image: cimg/node:22.0.0
+    resource_class: small
+    steps:
+      - checkout
+      - install-deps
+      - run:
+          name: Build
+          command: npm run build
+
+  e2e:
+    docker:
+      - image: cimg/node:22.0.0
+      - image: mcr.microsoft.com/playwright:v1.52.0-focal
+    resource_class: medium
+    steps:
+      - checkout
+      - install-deps
+      - setup-env
+      - run:
+          name: Install Playwright browsers
+          command: npx playwright install chromium
+      - run:
+          name: E2E tests
+          command: npm run test:e2e
+      - store_artifacts:
+          path: test-results
+
+  mutation:
+    docker:
+      - image: cimg/node:22.0.0
+    resource_class: medium
+    steps:
+      - checkout
+      - install-deps
+      - run:
+          name: Mutation tests
+          command: npx stryker run
+
+  deploy-vercel:
+    docker:
+      - image: cimg/node:22.0.0
+    resource_class: small
+    steps:
+      - checkout
+      - install-deps
+      - run:
+          name: Deploy to Vercel
+          command: npx vercel --prod --token=$VERCEL_TOKEN --yes
+
+workflows:
+  ci-branch:
+    jobs:
+      - lint
+      - test
+      - build:
+          requires:
+            - lint
+            - test
+
+  ci-main:
+    when:
+      equal: [main, << pipeline.git.branch >>]
+    jobs:
+      - lint
+      - test
+      - build:
+          requires:
+            - lint
+            - test
+      - e2e:
+          requires:
+            - test
+      - mutation:
+          requires:
+            - test
+      - deploy-vercel:
+          requires:
+            - build
+            - e2e
+          filters:
+            branches:
+              only: main

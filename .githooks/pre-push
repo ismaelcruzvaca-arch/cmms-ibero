@@ -1,0 +1,14 @@
+#!/bin/sh
+# pre-push hook — corre unit tests antes de pushear
+# Si los tests fallan, el push se cancela.
+# Esto ahorra minutos de CI al detectar errores temprano.
+
+echo "🔍 Running unit tests before push..."
+npm test
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ Unit tests FAILED. Push cancelled."
+  echo "   Fix the tests or use --no-verify to skip (not recommended)."
+  exit 1
+fi
+echo "✅ All tests passed. Pushing..."
