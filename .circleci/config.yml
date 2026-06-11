@@ -1,17 +1,19 @@
 version: 2.1
 
-orbs:
-  node: circleci/node@7.1.0
-
 commands:
   install-deps:
     steps:
-      - node/install:
-          node-version: '22.0.0'
-      - node/install-packages:
-          pkg-manager: npm
-          override-ci-command: npm ci --legacy-peer-deps
-          cache-version: v1
+      - restore_cache:
+          keys:
+            - v1-deps-{{ checksum "package-lock.json" }}
+            - v1-deps-
+      - run:
+          name: Install dependencies
+          command: npm ci --legacy-peer-deps
+      - save_cache:
+          key: v1-deps-{{ checksum "package-lock.json" }}
+          paths:
+            - node_modules
 
   setup-env:
     steps:
@@ -37,6 +39,7 @@ jobs:
       - run:
           name: Coverage
           command: npm run test:coverage
+          when: always
       - store_artifacts:
           path: coverage
 
@@ -50,6 +53,7 @@ jobs:
       - run:
           name: Lint
           command: npm run lint
+          when: always
 
   build:
     docker:
@@ -78,6 +82,7 @@ jobs:
           command: npm run test:e2e
       - store_artifacts:
           path: test-results
+          when: always
 
   mutation:
     docker:
