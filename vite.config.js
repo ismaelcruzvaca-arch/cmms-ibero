@@ -19,7 +19,8 @@ export default defineConfig({
   test: {
     exclude: ['tests/**', 'node_modules/**'],
     environment: 'jsdom',
-    setupFiles: [],
+    setupFiles: ['./vitest.setup.js'],
+    testTimeout: 30000,
     coverage: {
       provider: 'v8',
       include: ['src/**'],
