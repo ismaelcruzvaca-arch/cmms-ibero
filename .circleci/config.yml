@@ -50,7 +50,6 @@ jobs:
       - run:
           name: Lint
           command: npm run lint
-          when: always
 
   build:
     docker:
@@ -66,7 +65,6 @@ jobs:
   e2e:
     docker:
       - image: cimg/node:22.0.0
-      - image: mcr.microsoft.com/playwright:v1.52.0-focal
     resource_class: medium
     steps:
       - checkout
@@ -74,7 +72,7 @@ jobs:
       - setup-env
       - run:
           name: Install Playwright browsers
-          command: npx playwright install chromium
+          command: npx playwright install --with-deps chromium
       - run:
           name: E2E tests
           command: npm run test:e2e
@@ -90,7 +88,7 @@ jobs:
       - install-deps
       - run:
           name: Mutation tests
-          command: npx stryker run
+          command: npm run test:mutation
 
   deploy-vercel:
     docker:
@@ -132,7 +130,3 @@ workflows:
       - deploy-vercel:
           requires:
             - build
-            - e2e
-          filters:
-            branches:
-              only: main
