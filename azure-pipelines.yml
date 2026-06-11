@@ -1,5 +1,6 @@
-# Azure Pipelines — CI para cmms-ibero
-# Corre tests y build. Consume 1.800 min/mes gratis.
+# Azure Pipelines — CI completo para cmms-ibero
+# Branches: lint + test + build
+# Main:     lint + test + coverage + build + e2e + mutation + deploy
 
 trigger:
   branches:
@@ -9,31 +10,162 @@ trigger:
       - fix/*
       - review/*
 
-pool:
-  vmImage: ubuntu-latest
-
 variables:
   npm_config_cache: $(Pipeline.Workspace)/.npm
   node_version: 22.x
 
-steps:
-  - task: NodeTool@0
-    inputs:
-      versionSpec: $(node_version)
-    displayName: 'Install Node.js $(node_version)'
+stages:
+  # ────── STAGE 1: Lint ──────
+  - stage: Lint
+    jobs:
+      - job: lint
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(node_version)
+            displayName: 'Install Node.js $(node_version)'
 
-  - task: Cache@2
-    inputs:
-      key: npm | $(Agent.OS) | package-lock.json
-      path: $(npm_config_cache)
-    displayName: 'Cache npm'
+          - script: npm ci --legacy-peer-deps
+            displayName: 'Install dependencies'
 
-  - script: npm ci --legacy-peer-deps
-    displayName: 'Install dependencies'
+          - script: npm run lint
+            displayName: 'Lint'
+            continueOnError: true
 
-  - script: npm test
-    displayName: 'Unit tests'
+  # ────── STAGE 2: Test + Coverage ──────
+  - stage: Test
+    dependsOn: []
+    jobs:
+      - job: test
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(node_version)
+            displayName: 'Install Node.js $(node_version)'
 
-  - script: npm run build
-    displayName: 'Build'
-    condition: succeeded()
+          - task: Cache@2
+            inputs:
+              key: npm | $(Agent.OS) | package-lock.json
+              path: $(npm_config_cache)
+            displayName: 'Cache npm'
+
+          - script: npm ci --legacy-peer-deps
+            displayName: 'Install dependencies'
+
+          - script: npm test
+            displayName: 'Unit tests'
+
+          - script: npm run test:coverage
+            displayName: 'Coverage'
+            continueOnError: true
+
+          - task: PublishCodeCoverageResults@2
+            inputs:
+              summaryFileLocation: coverage/coverage-final.json
+              pathToSources: src/
+            displayName: 'Publish coverage report'
+            continueOnError: true
+
+  # ────── STAGE 3: Build ──────
+  - stage: Build
+    dependsOn:
+      - Lint
+      - Test
+    condition: and(succeeded('Lint'), succeeded('Test'))
+    jobs:
+      - job: build
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(node_version)
+            displayName: 'Install Node.js $(node_version)'
+
+          - script: npm ci --legacy-peer-deps
+            displayName: 'Install dependencies'
+
+          - script: npm run build
+            displayName: 'Build'
+
+  # ────── STAGE 4: E2E (solo main) ──────
+  - stage: E2E
+    dependsOn: [Test]
+    condition: and(succeeded('Test'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: e2e
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(node_version)
+            displayName: 'Install Node.js $(node_version)'
+
+          - script: npm ci --legacy-peer-deps
+            displayName: 'Install dependencies'
+
+          - script: npx playwright install --with-deps chromium
+            displayName: 'Install Playwright browsers'
+
+          - script: npm run test:e2e
+            displayName: 'E2E tests'
+            env:
+              VITE_SUPABASE_URL: $(SUPABASE_URL)
+              VITE_SUPABASE_ANON_KEY: $(SUPABASE_ANON_KEY)
+              VITE_TEST_EMAIL: $(VITE_TEST_EMAIL)
+              VITE_TEST_PASSWORD: $(VITE_TEST_PASSWORD)
+            continueOnError: true
+
+          - task: PublishTestResults@2
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: test-results/**/*.xml
+            displayName: 'Publish E2E results'
+            continueOnError: true
+
+  # ────── STAGE 5: Mutation (solo main) ──────
+  - stage: Mutation
+    dependsOn: [Test]
+    condition: and(succeeded('Test'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: mutation
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(node_version)
+            displayName: 'Install Node.js $(node_version)'
+
+          - script: npm ci --legacy-peer-deps
+            displayName: 'Install dependencies'
+
+          - script: npm run test:mutation
+            displayName: 'Mutation tests (Stryker)'
+            continueOnError: true
+
+  # ────── STAGE 6: Deploy (solo main) ──────
+  - stage: Deploy
+    dependsOn: [Build, E2E, Mutation]
+    condition: and(succeeded('Build'), succeeded('E2E'), succeeded('Mutation'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: deploy
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(node_version)
+            displayName: 'Install Node.js $(node_version)'
+
+          - script: npm ci --legacy-peer-deps
+            displayName: 'Install dependencies'
+
+          - script: npx vercel --prod --token=$(VERCEL_TOKEN) --yes
+            displayName: 'Deploy to Vercel'
+            continueOnError: true
