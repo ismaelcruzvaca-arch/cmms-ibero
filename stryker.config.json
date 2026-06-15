@@ -9,10 +9,14 @@
     "src/hooks/useWorkOrders*.js"
   ],
   "ignorePatterns": [
-    "**/__tests__/**",
-    "**/*.test.*",
     "**/node_modules/**"
   ],
+  "vitest": {
+    "configFile": "vite.config.js"
+  },
+  "timeoutMS": 300000,
+  "coverageAnalysis": "off",
+  "concurrency": 2,
   "thresholds": {
     "high": 80,
     "low": 50,

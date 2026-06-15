@@ -169,10 +169,16 @@ test.describe.serial('Commit 2: FSM validation trigger + audit trigger', () => {
   });
 
   test('valid transition pending -> in_progress creates audit row @commit2', async () => {
-    const { error: updError } = await supabase.from('work_orders')
-      .update({ status: 'in_progress', start_date: new Date().toISOString() })
+    // Step 1: Approve first (WAPPR -> APPROVED)
+    const { error: approveError } = await supabase.from('work_orders')
+      .update({ lifecycle_phase: 'APPROVED', approved_by: 'e2e-test' })
       .eq('id', testId);
+    expect(approveError).toBeNull();
 
+    // Step 2: Now transition to in_progress (APPROVED -> INPRG)
+    const { error: updError } = await supabase.from('work_orders')
+      .update({ lifecycle_phase: 'INPRG', start_date: new Date().toISOString() })
+      .eq('id', testId);
     expect(updError).toBeNull();
 
     const { data: history, error: histError } = await supabase
@@ -181,9 +187,9 @@ test.describe.serial('Commit 2: FSM validation trigger + audit trigger', () => {
       .eq('work_order_id', testId);
 
     expect(histError).toBeNull();
-    expect(history).toHaveLength(1);
-    expect(history[0].from_status).toBe('pending');
-    expect(history[0].to_status).toBe('in_progress');
+    expect(history).toHaveLength(2);
+    expect(history[1].from_status).toBe('approved');
+    expect(history[1].to_status).toBe('in_progress');
   });
 
   test('no-op status update does not create additional audit row @commit2', async () => {
@@ -199,7 +205,7 @@ test.describe.serial('Commit 2: FSM validation trigger + audit trigger', () => {
       .eq('work_order_id', testId);
 
     expect(histError).toBeNull();
-    expect(history).toHaveLength(1);
+    expect(history).toHaveLength(2);
   });
 
   test('invalid transition in_progress -> pending is rejected @commit2', async () => {
@@ -214,15 +220,19 @@ test.describe.serial('Commit 2: FSM validation trigger + audit trigger', () => {
       .select('*')
       .eq('work_order_id', testId);
 
-    expect(history).toHaveLength(1);
+    expect(history).toHaveLength(2);
   });
 
   test('terminal state rejects any transition @commit2', async () => {
-    // move to completed first
-    await supabase.from('work_orders').update({ status: 'completed' }).eq('id', testId);
+    // move to completed (INPRG -> COMP)
+    await supabase.from('work_orders').update({ lifecycle_phase: 'COMP' }).eq('id', testId);
 
+    // move to CLOSED (COMP -> CLOSED)
+    await supabase.from('work_orders').update({ lifecycle_phase: 'CLOSED' }).eq('id', testId);
+
+    // trying to go backwards (CLOSED -> INPRG) should be rejected
     const { error } = await supabase.from('work_orders')
-      .update({ status: 'cancelled' })
+      .update({ lifecycle_phase: 'INPRG' })
       .eq('id', testId);
 
     expect(error).not.toBeNull();
@@ -244,7 +254,8 @@ test.describe.serial('Commit 3: RLS policies + backfill', () => {
       asset_id: assetId
     });
 
-    await supabase.from('work_orders').update({ _deleted: true }).eq('id', testIdRls);
+    // Use RPC function because Supabase REST API blocks direct updates to _deleted
+    await supabase.rpc('soft_delete_work_order', { wo_id: testIdRls });
 
     // Authenticated user should not see it via SELECT policy
     const { data } = await supabase

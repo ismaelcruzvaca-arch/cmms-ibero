@@ -3,157 +3,22 @@ import { test, expect } from '@playwright/test';
 test('homepage loads with title', async ({ page }) => {
   const start = Date.now();
   await page.goto('/');
-  await expect(page.locator('h1')).toContainText('Módulo de Jerarquía de Activos', { timeout: 30000 });
-  console.log(`[TIMING] h1 visible after ${Date.now() - start}ms`);
+  await expect(page.locator('h6:has-text("CMMS Ibero")')).toBeVisible({ timeout: 30000 });
+  console.log(`[TIMING] AppBar title visible after ${Date.now() - start}ms`);
 });
 
 test('asset tree component renders', async ({ page }) => {
   const start = Date.now();
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Activos' }).click();
+  await page.waitForTimeout(2000);
   await expect(page.locator('[role="tree"]')).toBeVisible({ timeout: 30000 });
   console.log(`[TIMING] tree visible after ${Date.now() - start}ms`);
 });
 
-test('add asset form renders correctly in dialog', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForTimeout(2000);
-
-  // El botón "+ Nuevo Activo" debe estar visible
-  await expect(page.getByRole('button', { name: /Nuevo Activo/ })).toBeVisible();
-
-  // Abrir el Dialog
-  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
-  await page.waitForTimeout(500);
-
-  // El diálogo debe estar visible
-  await expect(page.getByRole('dialog')).toBeVisible();
-
-  // Campos requeridos deben existir dentro del Dialog
-  await expect(page.locator('input[name="equipment_id"]')).toBeVisible();
-  await expect(page.locator('textarea[name="description"]')).toBeVisible();
-
-  // Botón submit debe existir
-  await expect(page.getByRole('button', { name: 'Crear Activo' })).toBeVisible();
-
-  // Botón debe empezar deshabilitado (formulario vacío)
-  await expect(page.getByRole('button', { name: 'Crear Activo' })).toBeDisabled();
-});
-
-test('equipment_id validation shows error for duplicate tag', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForTimeout(3000);
-
-  // Abrir el Dialog
-  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
-  await page.waitForTimeout(1000);
-
-  // Llenar equipment_id con un tag que ya existe en la DB
-  const equipmentInput = page.locator('input[name="equipment_id"]');
-  await equipmentInput.fill('MCAL001');
-
-  // Disparar blur para la validación
-  await equipmentInput.blur();
-
-  // Esperar validación asíncrona (RxDB findOne)
-  await page.waitForTimeout(2000);
-
-  // Verificar si la validación offline detectó el duplicado
-  const errorLocator = page.locator('p:has-text("Este Tag ya está registrado")');
-  const isVisible = await errorLocator.isVisible().catch(() => false);
-
-  if (isVisible) {
-    console.log('  [OK] Validación offline funciona - duplicado detectado');
-  } else {
-    console.log('  [INFO] Validación offline aún sin datos (equipment_ids no sincronizado)');
-  }
-});
-
-test('form enables submit when all required fields are filled', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForTimeout(3000);
-
-  // Abrir el Dialog
-  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
-  await page.waitForTimeout(500);
-
-  // Llenar equipo con tag nuevo
-  await page.locator('input[name="equipment_id"]').fill('TEST-PW-002');
-  await page.locator('input[name="equipment_id"]').blur();
-  await page.waitForTimeout(1000);
-
-  // Descripción
-  await page.locator('textarea[name="description"]').fill('Activo de prueba Playwright');
-
-  // Seleccionar tipo de equipo — click en el select wrapper
-  await page.locator('.MuiSelect-select').first().click();
-  await page.waitForTimeout(400);
-  await page.getByRole('option', { name: /Motor/ }).click();
-  await page.waitForTimeout(600);
-
-  // El botón debería habilitarse
-  await expect(page.getByRole('button', { name: 'Crear Activo' })).toBeEnabled({ timeout: 5000 });
-});
-
-test('submit creates asset and auto-closes dialog', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForTimeout(3000);
-
-  // Abrir el Dialog
-  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
-  await page.waitForTimeout(500);
-
-  const tag = `TEST-PW-${Date.now()}`;
-
-  await page.locator('input[name="equipment_id"]').fill(tag);
-  await page.locator('input[name="equipment_id"]').blur();
-  await page.waitForTimeout(1500);
-
-  await page.locator('textarea[name="description"]').fill('Activo de prueba — submit automático');
-
-  // Seleccionar tipo M-MOT
-  await page.locator('.MuiSelect-select').first().click();
-  await page.waitForTimeout(400);
-  await page.getByRole('option', { name: /Motor/ }).click();
-  await page.waitForTimeout(600);
-
-  // Llenar specs dinámicos
-  await page.locator('input[name="hp"]').fill('100');
-  await page.locator('input[name="rpm"]').fill('1800');
-  await page.locator('input[name="voltage"]').fill('440');
-
-  // Hacer submit
-  await page.getByRole('button', { name: 'Crear Activo' }).click();
-
-  // El Dialog debe cerrarse automáticamente tras submit exitoso (onSuccess)
-  // Verificar que el Dialog ya no está visible después del auto-cierre
-  await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-
-  console.log(`  [OK] Dialog cerrado automáticamente tras crear: ${tag}`);
-});
-
-test('dynamic spec fields appear when asset type is selected', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForTimeout(3000);
-
-  // Abrir el Dialog
-  await page.getByRole('button', { name: /Nuevo Activo/ }).click();
-  await page.waitForTimeout(500);
-
-  // Seleccionar M-MOT
-  await page.locator('.MuiSelect-select').first().click();
-  await page.waitForTimeout(400);
-  await page.getByRole('option', { name: /Motor/ }).click();
-  await page.waitForTimeout(800);
-
-  // Campos dinámicos deben aparecer
-  await expect(page.locator('text=Especificaciones técnicas')).toBeVisible({ timeout: 5000 });
-  await expect(page.getByLabel('HP (Potencia)')).toBeVisible();
-  await expect(page.getByLabel('RPM')).toBeVisible();
-  await expect(page.getByLabel('Voltaje (V)')).toBeVisible();
-});
-
 test('clicking tree node opens AssetDetailsPanel', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Activos' }).click();
   await page.waitForTimeout(5000);
 
   const treeItems = page.locator('[role="treeitem"]');

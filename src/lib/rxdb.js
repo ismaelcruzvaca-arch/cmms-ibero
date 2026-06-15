@@ -90,7 +90,7 @@ const workOrderSchema = {
     work_center: { type: 'string' },
     planner_group: { type: 'string' },
     maintenance_reference: { type: 'string' },
-    revision: { type: 'number' },
+    wo_revision: { type: 'number' },
 
     // ── Campos de Control ──
     location: { type: 'string', maxLength: 100 },
@@ -280,7 +280,7 @@ const workOrdersMigrationV4 = {
       reported_by: oldDoc.reported_by || oldDoc.requested_by || '',
       created_by: oldDoc.created_by || '',
       maintenance_reference: oldDoc.maintenance_reference || '',
-      revision: oldDoc.revision || 0,
+      wo_revision: oldDoc.revision || 0,
       legacy_id: oldDoc.legacy_id || oldDoc.id || '',
       // Referencias
       job_plan_id: oldDoc.job_plan_id || '',
@@ -608,7 +608,7 @@ const WORK_ORDER_PUSH_FIELDS = [
   'failure_class', 'problem_code', 'cause_code', 'remedy_code',
   'asset_class', 'part_in_process', 'symptom_note', 'cause_note',
   'action_note', 'resolution_note', 'reported_by', 'created_by',
-  'maintenance_reference', 'revision', 'legacy_id', 'job_plan_id', 'meter_id',
+  'maintenance_reference', 'wo_revision', 'legacy_id', 'job_plan_id', 'meter_id',
   'is_auditable', 'audit_reason',
   '_conflict'
 ];
