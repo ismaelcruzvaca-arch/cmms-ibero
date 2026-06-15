@@ -1,39 +1,41 @@
-# Test artifacts
-.stryker-tmp
-reports
-coverage
-test-results
+# Test artifacts (root-level only)
+/reports
+/coverage
+/test-results
 
-# AI/IDE artifacts
-.engram
-.atl
-engram-backup-*.json
+# Stryker temp (root-level only)
+/.stryker-tmp
 
-# Docs (not needed for build)
-docs
-openspec
+# AI/IDE artifacts (root-level only)
+/.engram
+/.atl
+/engram-backup-*.json
+
+# Docs (root-level only)
+/docs
+/openspec
 *.md
 
-# CI configs (Vercel doesn't need them)
-.github
-.circleci
-.githooks
+# CI configs (root-level only)
+/.github
+/.circleci
+/.githooks
 
-# DB configs (frontend-only project)
-supabase
-sql
+# DB configs (root-level only)
+/supabase
+/sql
 
-# E2E tests (not needed for production build)
-tests
-playwright.config.js
+# E2E tests (root-level only)
+/tests
+/playwright.config.js
 
-# Stryker config
-stryker.config.json
-stryker-run.log
+# Stryker config (root-level only)
+/stryker.config.json
+/stryker-run.log
 
-# Mutation scripts (dev-only)
-scripts/run-mutation-*.sh
+# Mutation scripts (root-level only)
+/scripts/run-mutation-*.sh
 
 # Extras
-nul
-.gga
+/nul
+/.gga
