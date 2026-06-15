@@ -1,0 +1,39 @@
+# Test artifacts
+.stryker-tmp
+reports
+coverage
+test-results
+
+# AI/IDE artifacts
+.engram
+.atl
+engram-backup-*.json
+
+# Docs (not needed for build)
+docs
+openspec
+*.md
+
+# CI configs (Vercel doesn't need them)
+.github
+.circleci
+.githooks
+
+# DB configs (frontend-only project)
+supabase
+sql
+
+# E2E tests (not needed for production build)
+tests
+playwright.config.js
+
+# Stryker config
+stryker.config.json
+stryker-run.log
+
+# Mutation scripts (dev-only)
+scripts/run-mutation-*.sh
+
+# Extras
+nul
+.gga
